@@ -58,7 +58,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
-    'mainapp'
+    'mainapp',
+    "channels",
 ]
 
 MIDDLEWARE = [
@@ -92,6 +93,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'luminan_project.wsgi.application'
 
+
+# Redis channel layer (for production/real-time)
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

@@ -1,0 +1,115 @@
+<!-- company_welcome.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Welcome to Luminan</title>
+    <style>
+        /* Reset & base styles */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: #f4f6f9;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 30px auto;
+            background: linear-gradient(145deg, #ffffff, #e6f0ff);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: #007bff;
+            color: #fff;
+            padding: 25px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 26px;
+            letter-spacing: 1px;
+        }
+        .body {
+            padding: 30px;
+        }
+        h2 {
+            color: #007bff;
+            margin-top: 0;
+            font-size: 22px;
+        }
+        p {
+            line-height: 1.6;
+            font-size: 16px;
+            margin: 12px 0;
+        }
+        .info-card {
+            background: #ffffff;
+            border-left: 5px solid #007bff;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .info-card p {
+            margin: 6px 0;
+            font-weight: 500;
+        }
+        .btn {
+            display: inline-block;
+            background: linear-gradient(90deg, #007bff, #00c6ff);
+            color: #fff;
+            text-decoration: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: bold;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+        }
+        .footer {
+            background: #f0f3f7;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+        }
+        @media (max-width: 640px) {
+            .container {
+                margin: 15px;
+            }
+            .body {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Welcome to Luminan!</h1>
+        </div>
+        <div class="body">
+            <h2>Hello {{ company.company_name }},</h2>
+            <p>Congratulations! Your company registration on the Luminan platform is successful. We are thrilled to have you on board.</p>
+            
+            <div class="info-card">
+                <p><strong>Company ID:</strong> {{ company.company_id }}</p>
+                <p><strong>Registration Number:</strong> {{ company.company_registration_number }}</p>
+            </div>
+
+            <p>From here, you can start adding drivers, managing deliveries, and monitoring your operations. Luminan ensures your company workflow is seamless and efficient.</p>
+
+            <a href="https://thisisluminan.com/dashboard" class="btn">Go to Dashboard</a>
+        </div>
+        <div class="footer">
+            Luminan &copy; {{ current_year }} | Support: <a href="mailto:support@luminan.com">support@luminan.com</a> | <a href="https://thisisluminan.com/terms">Terms & Conditions</a>
+        </div>
+    </div>
+</body>
+</html>
