@@ -1,0 +1,1 @@
+web: gunicorn luminan_project.wsgi --bind 0.0.0.0:$PORT

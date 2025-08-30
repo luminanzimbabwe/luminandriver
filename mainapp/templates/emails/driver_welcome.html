@@ -78,6 +78,35 @@
             font-size: 12px;
             color: #666;
         }
+        .getting-started, .features, .support {
+            margin: 20px 0;
+            padding: 15px;
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .getting-started h3, .features h3, .support h3 {
+            color: #28a745;
+            margin-top: 0;
+            font-size: 20px;
+        }
+        .step {
+            margin: 10px 0;
+        }
+        .step-number {
+            font-weight: bold;
+            color: #28a745;
+        }
+        .support-item {
+            margin: 10px 0;
+        }
+        .support-link {
+            color: #28a745;
+            text-decoration: none;
+        }
+        .support-link:hover {
+            text-decoration: underline;
+        }
         @media (max-width: 640px) {
             .container { margin: 15px; }
             .body { padding: 20px; }
@@ -91,7 +120,7 @@
         </div>
         <div class="body">
             <h2>Hello {{ user.username }},</h2>
-            <p>Your registration as a driver on the Luminan platform is successful.</p>
+            <p>Your registration as a driver on the Luminan platform is successful. We are excited to have you on board!</p>
 
             <div class="info-card">
                 <p><strong>Company Name:</strong> {{ user.company_name }}</p>
@@ -99,11 +128,39 @@
                 <p><strong>Driver ID:</strong> {{ user.driver_id }}</p>
             </div>
 
+            <div class="getting-started">
+                <h3>🚀 Getting Started</h3>
+                <div class="step"><span class="step-number">1.</span> Complete your profile.</div>
+                <div class="step"><span class="step-number">2.</span> Familiarize yourself with the app.</div>
+                <div class="step"><span class="step-number">3.</span> Start accepting deliveries!</div>
+            </div>
+
+            <div class="features">
+                <h3>✨ Key Features</h3>
+                <p>With Luminan, you can:</p>
+                <ul>
+                    <li>Track your deliveries in real-time.</li>
+                    <li>Manage your schedule efficiently.</li>
+                    <li>Access support whenever you need it.</li>
+                </ul>
+            </div>
+
             <p>Please verify your account to get started by clicking the button below or using the verification code.</p>
 
             <a href="{{ link }}" class="btn">Verify Account</a>
 
             <p style="margin-top: 20px;">Your verification code: <strong>{{ code }}</strong></p>
+
+            <div class="support">
+                <h3>💬 Need Help?</h3>
+                <p>If you have any questions, feel free to reach out:</p>
+                <div class="support-item">
+                    <a href="mailto:support@luminan.com" class="support-link">Email Support</a>
+                </div>
+                <div class="support-item">
+                    <a href="https://thisisluminan.com/chat" class="support-link">Live Chat</a>
+                </div>
+            </div>
         </div>
         <div class="footer">
             Luminan &copy; {{ current_year }} | Support: <a href="mailto:support@luminan.com">support@luminan.com</a>

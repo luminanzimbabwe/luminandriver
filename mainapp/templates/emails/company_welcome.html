@@ -12,79 +12,332 @@
             font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
             background: #f4f6f9;
             color: #333;
+            line-height: 1.6;
         }
         .container {
             max-width: 600px;
             margin: 30px auto;
-            background: linear-gradient(145deg, #ffffff, #e6f0ff);
+            background: #ffffff;
             border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.12);
         }
+        
+        /* Header with gradient */
         .header {
-            background: #007bff;
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
             color: #fff;
-            padding: 25px;
+            padding: 40px 25px;
             text-align: center;
+            position: relative;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="2" fill="rgba(255,255,255,0.1)"/><circle cx="80" cy="40" r="1.5" fill="rgba(255,255,255,0.1)"/><circle cx="40" cy="70" r="1" fill="rgba(255,255,255,0.1)"/></svg>');
         }
         .header h1 {
             margin: 0;
-            font-size: 26px;
+            font-size: 28px;
             letter-spacing: 1px;
+            position: relative;
+            z-index: 1;
         }
+        .header .subtitle {
+            margin: 8px 0 0 0;
+            font-size: 16px;
+            opacity: 0.9;
+            position: relative;
+            z-index: 1;
+        }
+        
+        /* Main content */
         .body {
-            padding: 30px;
+            padding: 40px 30px;
         }
         h2 {
             color: #007bff;
             margin-top: 0;
-            font-size: 22px;
+            font-size: 24px;
+            margin-bottom: 20px;
         }
         p {
-            line-height: 1.6;
+            line-height: 1.7;
             font-size: 16px;
-            margin: 12px 0;
+            margin: 16px 0;
+            color: #555;
         }
+        
+        /* Enhanced info card */
         .info-card {
-            background: #ffffff;
+            background: linear-gradient(145deg, #f8f9ff, #ffffff);
+            border: 1px solid #e3e8ff;
             border-left: 5px solid #007bff;
-            padding: 15px 20px;
-            margin: 20px 0;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            padding: 25px;
+            margin: 25px 0;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0,123,255,0.08);
+        }
+        .info-card h3 {
+            margin: 0 0 15px 0;
+            color: #007bff;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+        }
+        .info-card h3::before {
+            content: "🏢";
+            margin-right: 8px;
+            font-size: 20px;
         }
         .info-card p {
-            margin: 6px 0;
+            margin: 8px 0;
             font-weight: 500;
+            color: #333;
+        }
+        .info-card .highlight {
+            background: #007bff;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        /* Getting started section */
+        .getting-started {
+            background: #f8f9fa;
+            padding: 30px;
+            margin: 30px -30px;
+            border-top: 1px solid #e9ecef;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .getting-started h3 {
+            color: #007bff;
+            margin: 0 0 20px 0;
+            font-size: 20px;
+            text-align: center;
+        }
+        .steps {
+            display: table;
+            width: 100%;
+            margin: 20px 0;
+        }
+        .step {
+            display: table-row;
+            margin-bottom: 15px;
+        }
+        .step-number {
+            display: table-cell;
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            text-align: center;
+            line-height: 40px;
+            border-radius: 50%;
+            font-weight: bold;
+            font-size: 16px;
+            vertical-align: top;
+        }
+        .step-content {
+            display: table-cell;
+            padding-left: 20px;
+            vertical-align: top;
+            padding-top: 8px;
+        }
+        .step-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        .step-desc {
+            color: #666;
+            font-size: 14px;
+            margin: 0;
+        }
+        
+        /* Features section */
+        .features {
+            margin: 30px 0;
+        }
+        .features h3 {
+            color: #007bff;
+            margin-bottom: 20px;
+            font-size: 20px;
+            text-align: center;
+        }
+        .feature-grid {
+            display: table;
+            width: 100%;
+        }
+        .feature-row {
+            display: table-row;
+        }
+        .feature {
+            display: table-cell;
+            width: 50%;
+            padding: 15px;
+            vertical-align: top;
+        }
+        .feature-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+            display: block;
+        }
+        .feature-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+        .feature-desc {
+            color: #666;
+            font-size: 13px;
+            margin: 0;
+            line-height: 1.4;
+        }
+        
+        /* Enhanced buttons */
+        .btn-container {
+            text-align: center;
+            margin: 30px 0;
         }
         .btn {
             display: inline-block;
-            background: linear-gradient(90deg, #007bff, #00c6ff);
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
             color: #fff;
             text-decoration: none;
-            padding: 12px 24px;
+            padding: 16px 32px;
             border-radius: 8px;
             font-weight: bold;
-            margin-top: 20px;
+            font-size: 16px;
+            margin: 8px;
             transition: all 0.3s ease;
+            box-shadow: 0 4px 16px rgba(0,123,255,0.3);
         }
         .btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+            box-shadow: 0 8px 24px rgba(0,123,255,0.4);
         }
-        .footer {
-            background: #f0f3f7;
-            padding: 20px;
+        .btn-secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            box-shadow: 0 4px 16px rgba(108,117,125,0.3);
+        }
+        .btn-secondary:hover {
+            box-shadow: 0 8px 24px rgba(108,117,125,0.4);
+        }
+        
+        /* Support section */
+        .support {
+            background: linear-gradient(145deg, #f8f9ff, #ffffff);
+            padding: 25px;
+            margin: 30px -30px 0 -30px;
+            border-top: 1px solid #e3e8ff;
+        }
+        .support h3 {
+            color: #007bff;
+            margin: 0 0 15px 0;
+            font-size: 18px;
             text-align: center;
+        }
+        .support-grid {
+            display: table;
+            width: 100%;
+            margin-top: 15px;
+        }
+        .support-item {
+            display: table-cell;
+            text-align: center;
+            padding: 10px;
+            vertical-align: top;
+        }
+        .support-icon {
+            font-size: 20px;
+            margin-bottom: 5px;
+            display: block;
+        }
+        .support-link {
+            color: #007bff;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .support-link:hover {
+            text-decoration: underline;
+        }
+        
+        /* Enhanced footer */
+        .footer {
+            background: linear-gradient(135deg, #f0f3f7 0%, #e9ecef 100%);
+            padding: 30px 20px;
+            text-align: center;
+            border-top: 1px solid #dee2e6;
+        }
+        .footer-content {
+            margin-bottom: 15px;
+        }
+        .footer-links {
+            margin: 15px 0;
+        }
+        .footer-links a {
+            color: #007bff;
+            text-decoration: none;
+            margin: 0 10px;
+            font-size: 13px;
+        }
+        .footer-links a:hover {
+            text-decoration: underline;
+        }
+        .footer-social {
+            margin-top: 15px;
+        }
+        .social-link {
+            display: inline-block;
+            margin: 0 8px;
+            font-size: 18px;
+            text-decoration: none;
+        }
+        .copyright {
             font-size: 12px;
             color: #666;
+            margin-top: 15px;
         }
+        
+        /* Responsive design */
         @media (max-width: 640px) {
             .container {
                 margin: 15px;
             }
-            .body {
+            .body, .getting-started, .support {
                 padding: 20px;
+            }
+            .getting-started, .support {
+                margin-left: -20px;
+                margin-right: -20px;
+            }
+            .feature {
+                display: block;
+                width: 100%;
+                margin-bottom: 15px;
+            }
+            .support-item {
+                display: block;
+                margin-bottom: 15px;
+            }
+            .btn {
+                display: block;
+                margin: 10px 0;
+            }
+            .header {
+                padding: 30px 20px;
+            }
+            .header h1 {
+                font-size: 24px;
             }
         }
     </style>
@@ -93,22 +346,122 @@
     <div class="container">
         <div class="header">
             <h1>Welcome to Luminan!</h1>
+            <p class="subtitle">Your journey to efficient logistics starts here</p>
         </div>
+        
         <div class="body">
             <h2>Hello {{ company.company_name }},</h2>
-            <p>Congratulations! Your company registration on the Luminan platform is successful. We are thrilled to have you on board.</p>
+            <p>🎉 Congratulations! Your company registration on the Luminan platform is successful. We are thrilled to have you join our growing community of logistics professionals.</p>
             
             <div class="info-card">
-                <p><strong>Company ID:</strong> {{ company.company_id }}</p>
-                <p><strong>Registration Number:</strong> {{ company.company_registration_number }}</p>
+                <h3>Your Company Details</h3>
+                <p><strong>Company ID:</strong> <span class="highlight">{{ company.company_id }}</span></p>
+                <p><strong>Registration Number:</strong> <span class="highlight">{{ company.company_registration_number }}</span></p>
+                <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">✓ Active</span></p>
             </div>
 
-            <p>From here, you can start adding drivers, managing deliveries, and monitoring your operations. Luminan ensures your company workflow is seamless and efficient.</p>
+            <div class="getting-started">
+                <h3>🚀 Get Started in 3 Easy Steps</h3>
+                <div class="steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">Set Up Your Profile</div>
+                            <p class="step-desc">Complete your company profile and upload your logo</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">Add Your Drivers</div>
+                            <p class="step-desc">Invite your drivers and set up their profiles</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">Start Managing Deliveries</div>
+                            <p class="step-desc">Create your first delivery and track it in real-time</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-            <a href="https://thisisluminan.com/dashboard" class="btn">Go to Dashboard</a>
+            <div class="features">
+                <h3>✨ What You Can Do With Luminan</h3>
+                <div class="feature-grid">
+                    <div class="feature-row">
+                        <div class="feature">
+                            <span class="feature-icon">🚛</span>
+                            <div class="feature-title">Fleet Management</div>
+                            <p class="feature-desc">Track and manage your entire fleet in real-time</p>
+                        </div>
+                        <div class="feature">
+                            <span class="feature-icon">📊</span>
+                            <div class="feature-title">Analytics Dashboard</div>
+                            <p class="feature-desc">Get insights into your delivery performance</p>
+                        </div>
+                    </div>
+                    <div class="feature-row">
+                        <div class="feature">
+                            <span class="feature-icon">👥</span>
+                            <div class="feature-title">Driver Management</div>
+                            <p class="feature-desc">Efficiently manage your driver workforce</p>
+                        </div>
+                        <div class="feature">
+                            <span class="feature-icon">📱</span>
+                            <div class="feature-title">Mobile App</div>
+                            <p class="feature-desc">Access everything on-the-go with our mobile app</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="btn-container">
+                <a href="https://thisisluminan.com/dashboard" class="btn">🚀 Go to Dashboard</a>
+                <a href="https://thisisluminan.com/getting-started" class="btn btn-secondary">📖 Getting Started Guide</a>
+            </div>
+
+            <p style="text-align: center; color: #666; font-style: italic;">Ready to transform your logistics operations? Let's get started!</p>
         </div>
+
+        <div class="support">
+            <h3>💬 Need Help? We're Here for You</h3>
+            <div class="support-grid">
+                <div class="support-item">
+                    <span class="support-icon">📧</span>
+                    <a href="mailto:support@luminan.com" class="support-link">Email Support</a>
+                </div>
+                <div class="support-item">
+                    <span class="support-icon">💬</span>
+                    <a href="https://thisisluminan.com/chat" class="support-link">Live Chat</a>
+                </div>
+                <div class="support-item">
+                    <span class="support-icon">📚</span>
+                    <a href="https://thisisluminan.com/help" class="support-link">Help Center</a>
+                </div>
+            </div>
+        </div>
+        
         <div class="footer">
-            Luminan &copy; {{ current_year }} | Support: <a href="mailto:support@luminan.com">support@luminan.com</a> | <a href="https://thisisluminan.com/terms">Terms & Conditions</a>
+            <div class="footer-content">
+                <strong>Luminan</strong> - Powering the Future of Logistics
+            </div>
+            <div class="footer-links">
+                <a href="https://thisisluminan.com/about">About Us</a>
+                <a href="https://thisisluminan.com/features">Features</a>
+                <a href="https://thisisluminan.com/pricing">Pricing</a>
+                <a href="https://thisisluminan.com/terms">Terms & Conditions</a>
+                <a href="https://thisisluminan.com/privacy">Privacy Policy</a>
+            </div>
+            <div class="footer-social">
+                <a href="https://twitter.com/luminan" class="social-link">🐦</a>
+                <a href="https://linkedin.com/company/luminan" class="social-link">💼</a>
+                <a href="https://facebook.com/luminan" class="social-link">📘</a>
+            </div>
+            <div class="copyright">
+                &copy; {{ current_year }} Luminan. All rights reserved.
+            </div>
         </div>
     </div>
 </body>
