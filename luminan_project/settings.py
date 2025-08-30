@@ -39,12 +39,12 @@ DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL")
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-7zksd=pghngit&8bt5+ev*e(79h5n154txih5$#)(^y5#a69a^'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Secret key
+SECRET_KEY = config("SECRET_KEY")
 
-
+# Debug mode
+DEBUG = config("DEBUG", default=False, cast=bool)
 
 
 # Application definition
