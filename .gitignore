@@ -1,5 +1,42 @@
+# Python
 thisisluminanvenv/
 __pycache__/
 *.pyc
 *.log
 .env
+.env*.local
+
+# Node / JavaScript
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native / iOS / Android
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro bundler
+.metro-health-check*
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# TypeScript
+*.tsbuildinfo
+
+# Example files
+app-example
