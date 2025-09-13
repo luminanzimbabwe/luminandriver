@@ -4,28 +4,50 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from bcrypt import hashpw, gensalt
 from datetime import datetime
+import traceback
+from django.views.decorators.csrf import csrf_exempt
 from .serializers import UserSerializer, LoginSerializer
 from db import db
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework_simplejwt.tokens import RefreshToken
 from bcrypt import checkpw
+from .token_utils import generate_tokens 
 from bson import ObjectId
 from datetime import datetime, timedelta
 import uuid
 from django.utils.timezone import now
 from django.core.mail import send_mail
+from .token_utils import refresh_access_token 
 import random
 from django.template.loader import render_to_string
+from django.contrib.auth.models import AnonymousUser
 import pytz
-
+from uuid import uuid4
+from decouple import config
+import jwt
+from .serializers import NotificationSerializer
+from .mongo import notifications 
+from rest_framework.authentication import SessionAuthentication
+from mainapp.authentication import UserTokenAuthentication, DriverTokenAuthentication
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from .utils import create_simple_token 
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from bson import ObjectId
+from datetime import datetime
+import bcrypt
+import secrets
 
 
 # Access the users collection
 users_collection = db.get_collection("users")  
+drivers_collection = db.get_collection("drivers")
+company_collaction = db.get_collection("company")
 products = db.products
 gas_orders = db.gas_orders
 notifications = db.notifications
-
+companies_collection = db["companies"] 
 
 
 LOCAL_TZ = pytz.timezone("Africa/Harare")
@@ -33,168 +55,158 @@ now = datetime.now(LOCAL_TZ)
 
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_TIME_MINUTES = 15 
-RESET_TOKEN_EXPIRY_HOURS = 1 
+RESET_TOKEN_EXPIRY_HOURS = 10000000000 
 MAX_FORGOT_REQUESTS = 3
 FORGOT_REQUEST_WINDOW_MINUTES = 15
 RESET_CODE_EXPIRY_MINUTES = 15
 
 
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_TIME_MINUTES = 15
+JWT_SECRET = config("SECRET_KEY")
+JWT_ALGORITHM = "HS256"
+JWT_EXP_DELTA_SECONDS = 60 * 60 * 24  # 1 day, for example
+JWT_EXP_DELTA_MINUTES = 60 * 60 * 24
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def test_view(request):
+    return Response({"message": "hello world"})
+
+
+
+def get_user_from_token(token):
+    return users_collection.find_one({"auth_token": token})
+
+
+
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_user(request):
+    data = request.data
     try:
-        # Prevent logged-in users from registering again
-        if request.user and request.user.is_authenticated:
-            return Response({"error": "You are already logged in."}, status=403)
+        # Validate required fields
+        required_fields = ["username", "email", "phone_number", "password", "confirm_password"]
+        for field in required_fields:
+            if not data.get(field):
+                return Response({"error": f"{field} is required"}, status=400)
 
-        serializer = UserSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({"errors": serializer.errors}, status=400)
+        if data["password"] != data["confirm_password"]:
+            return Response({"error": "Passwords do not match"}, status=400)
 
-        data = serializer.validated_data
+        # Check for existing user
+        if users_collection.find_one({"$or": [{"username": data["username"]}, {"email": data["email"]}]}):
+            return Response({"error": "Username or email already exists"}, status=400)
 
-        # Check uniqueness
-        existing_user = users_collection.find_one({
-            "$or": [
-                {"username": data['username']},
-                {"email": data['email']},
-                {"phone_number": data['phone_number']}
-            ]
-        })
-        if existing_user:
-            return Response({"error": "Username, email, or phone number already exists"}, status=400)
+        # Hash password
+        hashed_pw = bcrypt.hashpw(data["password"].encode(), bcrypt.gensalt())
 
-        # Hash password with bcrypt
-        hashed_pw = hashpw(data['password'].encode(), gensalt())
-        data['password'] = hashed_pw
-        data.pop('confirm_password', None)
-
-        # Verification setup
-        verification_token = str(uuid.uuid4())
-        verification_code = str(random.randint(100000, 999999))
-        expires_at = datetime.now() + timedelta(hours=24)  # token/code valid for 24 hours
-
-        # Add defaults
-        data.update({
-            "created_at": datetime.now(),
+        # Create user document
+        user_doc = {
+            "username": data["username"],
+            "email": data["email"],
+            "phone_number": data["phone_number"],
+            "password": hashed_pw,
             "role": "user",
-            "verified": False,
-            "verification_token": verification_token,
-            "verification_code": verification_code,
-            "verification_expires_at": expires_at.isoformat(),
-        })
+            "auth_token": secrets.token_hex(32),  # generate auth token
+            "created_at": datetime.now().isoformat(),
+        }
 
-        # Insert into DB
-        inserted_id = users_collection.insert_one(data).inserted_id
+        inserted_id = users_collection.insert_one(user_doc).inserted_id
 
-        # Prepare verification email
-        verification_link = f"http://localhost:8000/api/verify/?token={verification_token}"
-        html_content = render_to_string('emails/verification.html', {
-            'user': data,
-            'code': verification_code,
-            'link': verification_link
-        })
+        # Return single user object
+        user_doc["_id"] = str(inserted_id)
+        user_doc.pop("password")  # optional: don’t return hashed password
 
-        # Send verification email
-        send_mail(
-            subject=f"Welcome to Luminan, {data['username']}!",
-            message=f"Your email client does not support HTML. Your verification code is: {verification_code}",
-            from_email="Luminan Support <support@luminan.com>",
-            recipient_list=[data['email']],
-            html_message=html_content,
-            fail_silently=False
-        )
-
-        return Response({
-            "message": "User registered successfully. Please check your email to verify your account.",
-            "user_id": str(inserted_id)
-        }, status=201)
+        return Response({"user": user_doc}, status=201)
 
     except Exception as e:
         return Response({"error": "Registration failed", "details": str(e)}, status=500)
 
-#Users login_view 
 
-def create_jwt_for_mongo_user(user):
-    refresh = RefreshToken()
-    refresh['user_id'] = str(user["_id"])
-    refresh['username'] = user["username"]
-    refresh['role'] = user.get("role", "user")
 
-    return {
-        "refresh": str(refresh),
-        "access": str(refresh.access_token)
-    }
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_current_user(request):
+    user_id = request.query_params.get("id")  # client must send ?id=...
+    if not user_id:
+        return Response({"error": "User ID required"}, status=400)
+
+    user = users_collection.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        return Response({"error": "User not found"}, status=404)
+
+    return Response({
+        "id": str(user["_id"]),
+        "username": user["username"],
+        "email": user["email"],
+        "phone_number": user["phone_number"],
+        "role": user.get("role", "user"),
+        "verified": user.get("verified", False)
+    })
+
+
+#Users login_view
+
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_user(request):
     try:
-        serializer = LoginSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({"errors": serializer.errors}, status=400)
+        data = request.data
+        identifier = data.get("identifier")
+        password = data.get("password")
 
-        data = serializer.validated_data
-        identifier = data["identifier"]
-        password = data["password"]
+        if not identifier or not password:
+            return Response({"error": "Identifier and password are required"}, status=400)
 
+        # Find user by username, email, or phone
         user = users_collection.find_one({
             "$or": [
                 {"username": identifier},
+                {"email": identifier},
                 {"phone_number": identifier}
             ]
         })
 
         if not user:
-            return Response({"error": "Invalid username/phone number or password."}, status=401)
-
-        # Check if user is verified
-        if not user.get("verified", False):
-            return Response({"error": "Account not verified. Please verify your account first."}, status=403)
-
-        # Check if account is temporarily locked due to too many failed attempts
-        failed_attempts = user.get("failed_attempts", 0)
-        last_failed = user.get("last_failed_login")
-        if failed_attempts >= MAX_FAILED_ATTEMPTS:
-            if last_failed:
-                last_failed_dt = datetime.fromisoformat(last_failed)
-                if datetime.now() < last_failed_dt + timedelta(minutes=LOCKOUT_TIME_MINUTES):
-                    return Response({"error": "Account temporarily locked due to multiple failed login attempts. Try again later."}, status=403)
-            else:
-                # reset if last_failed not set
-                users_collection.update_one({"_id": user["_id"]}, {"$set": {"failed_attempts": 0}})
+            return Response({"error": "Invalid username/email/phone or password"}, status=401)
 
         # Verify password
-        if not checkpw(password.encode(), user['password']):
-            # Increment failed attempts
-            users_collection.update_one(
-                {"_id": user["_id"]},
-                {"$inc": {"failed_attempts": 1}, "$set": {"last_failed_login": datetime.now().isoformat()}}
-            )
-            return Response({"error": "Invalid username/phone number or password."}, status=401)
+        stored_password = user['password']
+        if isinstance(stored_password, str):
+            stored_password = stored_password.encode('utf-8')
 
-        # Reset failed attempts on successful login
+        if not checkpw(password.encode('utf-8'), stored_password):
+            return Response({"error": "Invalid username/email/phone or password"}, status=401)
+
+        # Generate new auth token
+        auth_token = secrets.token_hex(32)
         users_collection.update_one(
             {"_id": user["_id"]},
-            {"$set": {"failed_attempts": 0, "last_failed_login": None, "last_login": datetime.now().isoformat()}}
+            {"$set": {"auth_token": auth_token, "last_login": datetime.utcnow()}}
         )
 
-        tokens = create_jwt_for_mongo_user(user)
-
-        return Response({
-            "message": "Login successful",
-            "user_id": str(user["_id"]),
+        # Return single user object
+        user_resp = {
+            "id": str(user["_id"]),
             "username": user["username"],
+            "email": user.get("email"),
+            "phone_number": user.get("phone_number"),
             "role": user.get("role", "user"),
-            "tokens": tokens
-        }, status=200)
+            "auth_token": auth_token,
+            "verified": user.get("verified", True)  # if you removed verification, default True
+        }
+
+        return Response({"user": user_resp}, status=200)
 
     except Exception as e:
         return Response({"error": "Login failed", "details": str(e)}, status=500)
-
-
-
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -204,21 +216,19 @@ def verify_account(request):
         if not token:
             return Response({"error": "Verification token is required"}, status=400)
 
-        # Find user with this token
         user = users_collection.find_one({"verification_token": token})
         if not user:
             return Response({"error": "Invalid or expired verification token"}, status=400)
 
-        # Check if token has expired
         expires_at_str = user.get("verification_expires_at")
         if not expires_at_str:
             return Response({"error": "Verification token missing expiry"}, status=400)
 
         expires_at = datetime.fromisoformat(expires_at_str)
-        if datetime.now() > expires_at:
+        if datetime.utcnow() > expires_at:
             return Response({"error": "Verification token has expired"}, status=400)
 
-        # Update user as verified and remove token/code/expiry
+        # Mark as verified and remove token/code/expiry
         users_collection.update_one(
             {"_id": user["_id"]},
             {"$set": {"verified": True}, "$unset": {
@@ -228,7 +238,24 @@ def verify_account(request):
             }}
         )
 
-        return Response({"message": "Account verified successfully"}, status=200)
+        # Generate custom access + refresh tokens
+        from .token_utils import generate_tokens
+        tokens = generate_tokens(str(user["_id"]))
+
+        profile_data = {
+            "id": str(user["_id"]),
+            "username": user["username"],
+            "email": user.get("email"),
+            "phone_number": user.get("phone_number"),
+            "role": user.get("role", "user"),
+            "verified": True
+        }
+
+        return Response({
+            "message": "Account verified successfully",
+            "tokens": tokens,
+            "user": profile_data
+        }, status=200)
 
     except Exception as e:
         return Response({"error": "Verification failed", "details": str(e)}, status=500)
@@ -246,13 +273,12 @@ def verify_account_code(request):
         if not user:
             return Response({"error": "Invalid or expired verification code"}, status=400)
 
-        # Check if code has expired
         expires_at_str = user.get("verification_expires_at")
         if not expires_at_str:
             return Response({"error": "Verification code missing expiry"}, status=400)
 
         expires_at = datetime.fromisoformat(expires_at_str)
-        if datetime.now() > expires_at:
+        if datetime.utcnow() > expires_at:
             return Response({"error": "Verification code has expired"}, status=400)
 
         # Mark as verified and remove token/code/expiry
@@ -265,138 +291,188 @@ def verify_account_code(request):
             }}
         )
 
-        return Response({"message": "Account verified successfully"}, status=200)
+        # Generate custom access + refresh tokens
+        from .token_utils import generate_tokens
+        tokens = generate_tokens(str(user["_id"]))
+
+        profile_data = {
+            "id": str(user["_id"]),
+            "username": user["username"],
+            "email": user.get("email"),
+            "phone_number": user.get("phone_number"),
+            "role": user.get("role", "user"),
+            "verified": True
+        }
+
+        return Response({
+            "message": "Account verified successfully",
+            "tokens": tokens,
+            "user": profile_data
+        }, status=200)
 
     except Exception as e:
         return Response({"error": "Verification failed", "details": str(e)}, status=500)
 
 
- 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])  # Only logged-in users can access
-def get_profile(request):
+
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def refresh_token_view(request):
     try:
-        # Extract user_id from the JWT payload (stored in request.user after authentication)
-        user_id = request.user.user_id  
+        refresh_token = request.data.get("refresh_token")
+        if not refresh_token:
+            return Response({"error": "Refresh token is required"}, status=400)
 
-        # Fetch user from MongoDB
-        user = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})  # exclude password
-        if not user:
-            return Response({"error": "User not found"}, status=404)
+        # Generate a new access token using the refresh token
+        new_tokens = refresh_access_token(refresh_token)
+        if not new_tokens:
+            return Response({"error": "Invalid or expired refresh token"}, status=401)
 
-        # Convert ObjectId to string
-        user['_id'] = str(user['_id'])
-
-        return Response({"profile": user}, status=200)
+        return Response({
+            "message": "Access token refreshed successfully",
+            "tokens": new_tokens
+        }, status=200)
 
     except Exception as e:
-        return Response({"error": "Failed to fetch profile", "details": str(e)}, status=500)       
-    
+        return Response({"error": "Failed to refresh token", "details": str(e)}, status=500)
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])  # auth handled manually
+def get_profile(request):
+    try:
+        # Get token from Authorization header
+        token = request.headers.get("Authorization")
+        if not token:
+            return Response({"error": "Forbidden: No token provided"}, status=403)
+
+        # Remove "Bearer " prefix if included
+        if token.startswith("Bearer "):
+            token = token[7:]
+
+        user = get_user_from_token(token)
+        if not user:
+            return Response({"error": "Forbidden: Invalid or expired token"}, status=403)
+
+        # Return only relevant fields to avoid sending sensitive data
+        profile_data = {
+            "id": str(user["_id"]),
+            "username": user.get("username"),
+            "email": user.get("email"),
+            "phone_number": user.get("phone_number"),
+            "role": user.get("role", "user"),
+            "verified": user.get("verified", True),
+            "created_at": user.get("created_at")
+        }
+
+        return Response({"profile": profile_data}, status=200)
+
+    except Exception as e:
+        return Response({"error": "Failed to fetch profile", "details": str(e)}, status=500)
 
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def forgot_password(request):
-    email = request.data.get("email")
-    if not email:
-        return Response({"error": "Email is required"}, status=400)
+    try:
+        email = request.data.get("email")
+        if not email:
+            return Response({"error": "Email is required"}, status=400)
 
-    user = users_collection.find_one({"email": email})
+        user = users_collection.find_one({"email": email})
+        if not user:
+            # Generic response to prevent enumeration
+            return Response({"message": "If this account exists, a reset code has been sent."}, status=200)
 
-    # Prevent account enumeration: always respond with success
-    if not user:
+        now = datetime.utcnow()
+        last_request = user.get("last_forgot_request")
+        request_count = user.get("forgot_request_count", 0)
+
+        if last_request:
+            last_request_dt = datetime.fromisoformat(last_request)
+            if now - last_request_dt < timedelta(minutes=FORGOT_REQUEST_WINDOW_MINUTES):
+                if request_count >= MAX_FORGOT_REQUESTS:
+                    return Response({"error": "Too many password reset requests. Try again later."}, status=429)
+            else:
+                request_count = 0  # reset counter if outside window
+
+        # Generate reset code
+        reset_code_plain = str(random.randint(100000, 999999))
+        reset_code_hashed = hashpw(reset_code_plain.encode(), gensalt())
+        expires_at = now + timedelta(minutes=RESET_CODE_EXPIRY_MINUTES)
+
+        # Save to MongoDB
+        users_collection.update_one(
+            {"_id": user["_id"]},
+            {"$set": {
+                "reset_code": reset_code_hashed.decode(),  # store as string
+                "reset_code_expiry": expires_at.isoformat(),
+                "last_forgot_request": now.isoformat(),
+                "forgot_request_count": request_count + 1
+            }}
+        )
+
+        # Send email
+        html_content = render_to_string('emails/reset_password.html', {
+            'user': user,
+            'code': reset_code_plain,
+            'expiry_minutes': RESET_CODE_EXPIRY_MINUTES
+        })
+
+        send_mail(
+            subject="Luminan Password Reset Request",
+            message=f"Your password reset code is: {reset_code_plain}",
+            from_email="Luminan Support <support@luminan.com>",
+            recipient_list=[email],
+            html_message=html_content,
+            fail_silently=False
+        )
+
         return Response({"message": "If this account exists, a reset code has been sent."}, status=200)
 
-    # Rate-limiting
-    now = datetime.now()
-    last_request = user.get("last_forgot_request")
-    request_count = user.get("forgot_request_count", 0)
-
-    if last_request:
-        last_request_dt = datetime.fromisoformat(last_request)
-        if now - last_request_dt < timedelta(minutes=FORGOT_REQUEST_WINDOW_MINUTES):
-            if request_count >= MAX_FORGOT_REQUESTS:
-                return Response({
-                    "error": f"Too many password reset requests. Try again later."
-                }, status=429)
-        else:
-            request_count = 0  # reset count after window
-
-    # Generate 6-digit reset code
-    reset_code_plain = str(random.randint(100000, 999999))
-    reset_code_hashed = hashpw(reset_code_plain.encode(), gensalt())
-    expires_at = now + timedelta(minutes=RESET_CODE_EXPIRY_MINUTES)
-
-    users_collection.update_one(
-        {"_id": user["_id"]},
-        {"$set": {
-            "reset_code": reset_code_hashed,
-            "reset_code_expiry": expires_at.isoformat(),
-            "last_forgot_request": now.isoformat(),
-            "forgot_request_count": request_count + 1
-        }}
-    )
-
-    # Prepare HTML email
-    html_content = render_to_string('emails/reset_password.html', {
-        'user': user,
-        'code': reset_code_plain,
-        'expiry_minutes': RESET_CODE_EXPIRY_MINUTES
-    })
-
-    # Send email
-    send_mail(
-        subject="Luminan Password Reset Request",
-        message=f"Your password reset code is: {reset_code_plain}\nThis code expires in {RESET_CODE_EXPIRY_MINUTES} minutes.",
-        from_email="Luminan Support <support@luminan.com>",
-        recipient_list=[email],
-        html_message=html_content,
-        fail_silently=False
-    )
-
-    return Response({"message": "If this account exists, a reset code has been sent."}, status=200)
-
+    except Exception as e:
+        return Response({"error": "Failed to process password reset", "details": str(e)}, status=500)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def reset_password(request):
     try:
+        email = request.data.get("email")
         code = request.data.get("code")
         new_password = request.data.get("new_password")
         confirm_password = request.data.get("confirm_password")
 
-        # Validate inputs
-        if not all([code, new_password, confirm_password]):
-            return Response({"error": "Code, new password, and confirm password are required"}, status=400)
+        if not all([email, code, new_password, confirm_password]):
+            return Response({"error": "Email, code, new password, and confirm password are required"}, status=400)
         if new_password != confirm_password:
             return Response({"error": "Passwords do not match"}, status=400)
 
-        # Find user with a reset code
-        user = users_collection.find_one({"reset_code": {"$exists": True}})
-        if not user or not checkpw(code.encode(), user["reset_code"]):
+        user = users_collection.find_one({"email": email})
+        if not user or "reset_code" not in user:
             return Response({"error": "Invalid or expired code"}, status=400)
 
-        # Validate code expiry
+        # Check reset code
+        stored_code = user["reset_code"].encode('utf-8') if isinstance(user["reset_code"], str) else user["reset_code"]
+        if not checkpw(code.encode(), stored_code):
+            return Response({"error": "Invalid or expired code"}, status=400)
+
+        # Check expiry
         expiry_str = user.get("reset_code_expiry")
-        if not expiry_str:
-            return Response({"error": "Reset code missing expiry"}, status=400)
-        if datetime.now() > datetime.fromisoformat(expiry_str):
+        if not expiry_str or datetime.utcnow() > datetime.fromisoformat(expiry_str):
             return Response({"error": "Reset code has expired"}, status=400)
 
-        # Hash the new password
-        hashed_pw = hashpw(new_password.encode(), gensalt())
-
-        # Update user password and remove reset code fields
+        # Hash new password
+        hashed_pw = hashpw(new_password.encode(), gensalt()).decode('utf-8')
         users_collection.update_one(
             {"_id": user["_id"]},
             {"$set": {"password": hashed_pw}, "$unset": {"reset_code": "", "reset_code_expiry": ""}}
         )
 
-        # Optional: send confirmation email
-        html_content = render_to_string('emails/reset_password_success.html', {'user': user})
+        # Send confirmation email
+        html_content = render_to_string('emails/password_reset_success.html', {'user': user})
         send_mail(
             subject="Your Luminan Password Has Been Reset",
             message="Your password was reset successfully.",
@@ -411,42 +487,39 @@ def reset_password(request):
     except Exception as e:
         return Response({"error": "Password reset failed", "details": str(e)}, status=500)
 
+
+
+# -------------------------
+# Logout endpoint
+
+
 # -------------------------
 # Logout endpoint
 # -------------------------
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def logout_user(request):
-    try:
-        # Expect refresh token in request body
-        refresh_token = request.data.get("refresh")
-        if not refresh_token:
-            return Response({"error": "Refresh token is required"}, status=400)
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not token or not get_user_from_token(token):
+        return Response({"error": "Invalid or missing token"}, status=403)
 
-        # Blacklist the token
-        try:
-            token = RefreshToken(refresh_token)
-            token.blacklist()  # Requires SimpleJWT's blacklist app enabled
-        except Exception:
-            return Response({"error": "Invalid or expired token"}, status=400)
-
-        return Response({"message": "Logged out successfully."}, status=200)
-
-    except Exception as e:
-        return Response({"error": "Logout failed", "details": str(e)}, status=500)
+    # For simple token auth, logout is just client-side: remove token from app
+    return Response({"message": "Logged out successfully."}, status=200)
 
 
 # -------------------------
 # Delete account endpoint
 # -------------------------
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def delete_account(request):
-    try:
-        user_id = request.user.user_id  # Extract user_id from JWT payload
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = get_user_from_token(token)
+    if not user:
+        return Response({"error": "Invalid or missing token"}, status=403)
 
-        # Delete user from MongoDB
-        result = users_collection.delete_one({"_id": ObjectId(user_id)})
+    try:
+        result = users_collection.delete_one({"_id": ObjectId(user["_id"])})
         if result.deleted_count == 0:
             return Response({"error": "User not found"}, status=404)
 
@@ -455,94 +528,286 @@ def delete_account(request):
     except Exception as e:
         return Response({"error": "Account deletion failed", "details": str(e)}, status=500)
 
-
 #.......logic gas orders 
 
 
 
+def is_valid_objectid(id_str):
+    try:
+        ObjectId(id_str)
+        return True
+    except Exception:
+        return False
+
+
+
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def create_gas_order(request):
     try:
+        # --- Authenticate user ---
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        user = get_user_from_token(token)
+        if not user:
+            return Response({"error": "Forbidden: Invalid token"}, status=403)
+
         data = request.data
 
-        # ✅ Validate required fields
-        required_fields = ["product_id", "quantity", "delivery_address", "payment_method"]
-        for field in required_fields:
-            if field not in data:
+        # --- Validate required fields ---
+        for field in ["delivery_address", "payment_method"]:
+            if not data.get(field):
                 return Response({"error": f"{field} is required"}, status=400)
 
-        # ✅ Fetch product
-        product = products.find_one({"_id": ObjectId(data["product_id"])})
-        if not product:
-            return Response({"error": "Invalid product_id"}, status=404)
+        delivery_address = data["delivery_address"].strip()
+        notes = data.get("notes", "").strip()
 
-        # ✅ Calculate pricing
-        unit_price = product["price"]
-        quantity = int(data["quantity"])
-        total_price = unit_price * quantity
+        # --- Product Handling ---
+        product_id = data.get("product_id")
+        product = None
+        vendor_id = None
+        weight = None
 
-        # ✅ Build order document
+        if product_id:
+            try:
+                if is_valid_objectid(str(product_id)):
+                    product = products.find_one({"_id": ObjectId(product_id)})
+                else:
+                    product_index = int(product_id)
+                    all_products = list(products.find().sort("_id", 1))
+                    if 0 <= product_index < len(all_products):
+                        product = all_products[product_index]
+                    else:
+                        return Response({"error": "Product index out of range"}, status=400)
+                if not product:
+                    return Response({"error": "Product not found"}, status=404)
+
+                # Use customer-provided weight if exists; else product weight
+                weight = float(data.get("weight") or str(product.get("weight", "1")).replace("kg", ""))
+
+                vendor_id = product.get("vendor_id")
+                product_id = str(product["_id"])
+
+            except Exception as e:
+                return Response({"error": "Invalid product_id", "details": str(e)}, status=400)
+        else:
+            # Custom order
+            try:
+                weight = float(data.get("weight", 1))
+                if weight <= 0:
+                    raise ValueError("Weight must be positive")
+            except (TypeError, ValueError):
+                return Response({"error": "Invalid or missing weight for custom order"}, status=400)
+
+        # --- Quantity & surcharge ---
+        try:
+            quantity = int(data.get("quantity", 1))
+            if quantity <= 0:
+                quantity = 1
+        except (TypeError, ValueError):
+            quantity = 1
+
+        driver_surcharge = float(data.get("driver_surcharge", 0))
+
+        # --- Build order document ---
         now = datetime.now(LOCAL_TZ)
         order = {
-            "customer_id": ObjectId(request.user["_id"]),
-            "product_id": ObjectId(data["product_id"]),
-            "vendor_id": product.get("vendor_id"),
+            "customer_id": ObjectId(str(user["_id"])) if user else None,
+            "customer_name": user.get("name", "N/A"),
+            "customer_phone": data.get("phone") or user.get("phone") or "N/A",
+            "product_id": ObjectId(product_id) if product_id else None,
+            "vendor_id": vendor_id,
             "quantity": quantity,
-            "unit_price": unit_price,
-            "total_price": total_price,
+            "unit_price": None,     # will be set when driver assigned
+            "total_price": 0,       # will be set after driver assignment
             "delivery_type": data.get("delivery_type", "home_delivery"),
-            "delivery_address": data["delivery_address"],
-            "scheduled_time": data.get("scheduled_time"),  # optional
+            "delivery_address": delivery_address,
+            "scheduled_time": data.get("scheduled_time"),
             "payment_method": data["payment_method"],
             "payment_status": "pending",
             "order_status": "pending",
             "assigned_driver_id": None,
-            "notes": data.get("notes", ""),
+            "notes": notes,
+            "driver_surcharge": driver_surcharge,
+            "weight": weight,
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }
 
-        # ✅ Insert into DB
+        # --- Save to DB ---
         inserted_id = gas_orders.insert_one(order).inserted_id
+        order_id_str = str(inserted_id)
+
+        # --- Send notifications ---
+        send_notification(
+            user_id=user["_id"],
+            type_="order",
+            message=f"Your order {order_id_str} has been created successfully! "
+                    "We will calculate the price after a driver is assigned.",
+            order_id=order_id_str
+        )
 
         return Response({
             "message": "Order created successfully",
-            "order_id": str(inserted_id),
-            "total_price": total_price,
+            "order_id": order_id_str,
             "order_status": "pending"
         }, status=201)
 
     except Exception as e:
+        print("Error creating order:", str(e))
         return Response({"error": "Failed to create order", "details": str(e)}, status=500)
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def list_user_orders(request):
+
+
+
+@api_view(['PATCH'])
+@permission_classes([AllowAny])
+def assign_driver(request, order_id):
+    """
+    Assign a driver to a gas order.
+    Updates unit_price, total_price, and notifies customer and driver.
+    """
     try:
-        customer_id = ObjectId(request.user["_id"])
-        
+        driver_id = request.data.get("driver_id")
+        if not driver_id:
+            return Response({"error": "driver_id is required"}, status=400)
+
+        # Convert IDs to ObjectId
+        try:
+            oid_order = ObjectId(order_id)
+            oid_driver = ObjectId(driver_id)
+        except Exception:
+            return Response({"error": "Invalid order_id or driver_id"}, status=400)
+
+        # Fetch order
+        order = gas_orders.find_one({"_id": oid_order})
+        if not order:
+            return Response({"error": "Order not found"}, status=404)
+
+        # Prevent double assignment
+        if order.get("assigned_driver_id"):
+            return Response({"error": "Order already has a driver assigned"}, status=400)
+
+        # Fetch driver
+        driver = drivers_collection.find_one({"_id": oid_driver})
+        if not driver:
+            return Response({"error": "Driver not found"}, status=404)
+
+        # --- Get driver's price_per_kg ---
+        driver_price = driver.get("price_per_kg")
+        if not driver_price or driver_price <= 0:
+            return Response({"error": "Driver does not have a valid price_per_kg set"}, status=400)
+
+        unit_price = float(driver_price)
+        weight = float(order.get("weight", 1))
+        quantity = int(order.get("quantity", 1))
+        driver_surcharge = float(order.get("driver_surcharge", 0))
+
+        # Calculate total price
+        total_price = unit_price * weight * quantity + driver_surcharge
+        now = datetime.now(LOCAL_TZ)
+
+        # Update order with driver, unit_price, and total_price
+        gas_orders.update_one(
+            {"_id": oid_order},
+            {"$set": {
+                "assigned_driver_id": oid_driver,
+                "unit_price": unit_price,
+                "total_price": total_price,
+                "updated_at": now.isoformat()
+            }}
+        )
+
+        # Mark driver as busy
+        drivers_collection.update_one({"_id": oid_driver}, {"$set": {"status": "busy"}})
+
+        # --- Send notifications ---
+        send_notification(
+            user_id=order["customer_id"],
+            type_="driver_assigned",
+            message=f"A driver has been assigned to your order {order_id}.",
+            order_id=order_id
+        )
+
+        send_notification(
+            user_id=driver_id,
+            type_="new_order",
+            message=f"You have been assigned to order {order_id}.",
+            order_id=order_id
+        )
+
+        updated_order = gas_orders.find_one({"_id": oid_order})
+
+        return Response({
+            "message": "Driver assigned successfully and notifications sent",
+            "order": {
+                "order_id": str(updated_order["_id"]),
+                "driver_id": str(oid_driver),
+                "unit_price": updated_order.get("unit_price"),
+                "total_price": updated_order.get("total_price"),
+                "order_status": updated_order.get("order_status"),
+                "assigned_driver_id": str(updated_order.get("assigned_driver_id")),
+            }
+        }, status=200)
+
+    except Exception as e:
+        print("Error in assign_driver:", str(e))
+        return Response({"error": "Failed to assign driver", "details": str(e)}, status=500)
+
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])  # still allowing any, but token check inside
+def list_user_orders(request):
+    print(">>> Request headers:", request.headers)
+
+    try:
+        # Authenticate user via token
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        user = get_user_from_token(token)
+        if not user:
+            return Response({"error": "Forbidden: Invalid token"}, status=403)
+
+        # Make sure user has _id
+        if "_id" not in user:
+            return Response({"error": "User ID not found in token"}, status=400)
+
+        customer_id = ObjectId(str(user["_id"]))
+
+        # Fetch user orders
         orders_cursor = gas_orders.find({"customer_id": customer_id}).sort("created_at", -1)
         orders = []
         for order in orders_cursor:
             orders.append({
-                "order_id": str(order["_id"]),
-                "product_id": str(order["product_id"]),
-                "quantity": order["quantity"],
-                "total_price": order["total_price"],
-                "order_status": order["order_status"],
-                "delivery_address": order["delivery_address"],
-                "scheduled_time": order.get("scheduled_time"),
-                "payment_method": order["payment_method"],
-                "notes": order.get("notes"),
-                "created_at": order["created_at"]
-            })
-        
+    "order_id": str(order["_id"]),
+    "product_id": str(order.get("product_id")) if order.get("product_id") else None,
+    "quantity": order["quantity"],
+    "weight": order.get("weight", 1),  # send weight
+    "driver_surcharge": order.get("driver_surcharge", 0),  # send surcharge
+    "total_price": order.get("total_price", 0),
+    "unit_price": order.get("unit_price") or drivers_collection.get("price_per_kg", 0),
+    "driver_surcharge": order.get("driver_surcharge", 0),
+
+    "order_status": order["order_status"],
+    "delivery_address": order["delivery_address"],
+    "scheduled_time": order.get("scheduled_time"),
+    "payment_method": order["payment_method"],
+    "notes": order.get("notes"),
+    "vendor_id": str(order.get("vendor_id")) if order.get("vendor_id") else None,
+    "assigned_driver_id": str(order.get("assigned_driver_id")) if order.get("assigned_driver_id") else None,
+    "created_at": order["created_at"]
+})
+
+
+        print(f">>> Fetched {len(orders)} orders for user {user.get('email', user.get('_id'))}")
         return Response({"orders": orders}, status=200)
 
     except Exception as e:
+        print(">>> Exception in list_user_orders:", e)
         return Response({"error": "Failed to fetch orders", "details": str(e)}, status=500)
+
+
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -592,8 +857,6 @@ def get_order_detail(request, order_id):
 
 
 
-
-# Helper function to send notification
 def send_notification(user_id, type_, message, order_id=None):
     notifications.insert_one({
         "user_id": ObjectId(user_id),
@@ -601,7 +864,7 @@ def send_notification(user_id, type_, message, order_id=None):
         "message": message,
         "order_id": ObjectId(order_id) if order_id else None,
         "read": False,
-        "created_at": datetime.now(LOCAL_TZ).isoformat()
+        "created_at": datetime.now(LOCAL_TZ)  # store as datetime, not string
     })
 
 @api_view(['PATCH'])
@@ -734,16 +997,16 @@ def cancel_order(request, order_id):
         return Response({"error": "Failed to cancel order", "details": str(e)}, status=500)
 
 
-
-
-
-
-
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def get_user_notifications(request):
     try:
-        user_id = request.user["_id"]
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        user = get_user_from_token(token)
+        if not user:
+            return Response({"error": "Forbidden: Invalid token"}, status=403)
+
+        user_id = str(user["_id"])
         unread_only = request.GET.get("unread", "false").lower() == "true"
 
         query = {"user_id": ObjectId(user_id)}
@@ -757,94 +1020,109 @@ def get_user_notifications(request):
                 "notification_id": str(n["_id"]),
                 "type": n["type"],
                 "message": n["message"],
-                "order_id": str(n["order_id"]) if n.get("order_id") else None,
+                "order_id": str(n.get("order_id")) if n.get("order_id") else None,
                 "read": n.get("read", False),
                 "created_at": n.get("created_at")
             })
 
-        return Response({"notifications": notif_list}, status=200)
+        serializer = NotificationSerializer(notif_list, many=True)
+        return Response({"notifications": serializer.data}, status=200)
 
     except Exception as e:
         return Response({"error": "Failed to fetch notifications", "details": str(e)}, status=500)
 
 
-
-
-
-
-
+# -------------------------
+# Mark a single notification as read
+# -------------------------
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def mark_notification_read(request, notification_id):
     try:
-        user_id = request.user["_id"]
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        user = get_user_from_token(token)
+        if not user:
+            return Response({"error": "Forbidden: Invalid token"}, status=403)
 
         try:
             oid = ObjectId(notification_id)
         except:
             return Response({"error": "Invalid notification ID"}, status=400)
 
-        notif = notifications.find_one({"_id": oid, "user_id": ObjectId(user_id)})
+        notif = notifications.find_one({"_id": oid, "user_id": ObjectId(user["_id"])})
         if not notif:
             return Response({"error": "Notification not found"}, status=404)
 
-        notifications.update_one(
-            {"_id": oid},
-            {"$set": {"read": True}}
-        )
-
+        notifications.update_one({"_id": oid}, {"$set": {"read": True}})
         return Response({"message": "Notification marked as read"}, status=200)
 
     except Exception as e:
         return Response({"error": "Failed to mark notification as read", "details": str(e)}, status=500)
 
 
-
-
+# -------------------------
+# Mark all notifications read
+# -------------------------
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def mark_all_notifications_read(request):
     try:
-        user_id = request.user["_id"]
-        unread_only = request.data.get("unread_only", True)  # default: only unread
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        user = get_user_from_token(token)
+        if not user:
+            return Response({"error": "Forbidden: Invalid token"}, status=403)
 
-        query = {"user_id": ObjectId(user_id)}
+        unread_only = request.data.get("unread_only", True)
+        query = {"user_id": ObjectId(user["_id"])}
         if unread_only:
             query["read"] = False
 
-        result = notifications.update_many(
-            query,
-            {"$set": {"read": True}}
-        )
-
-        return Response({
-            "message": f"{result.modified_count} notification(s) marked as read"
-        }, status=200)
+        result = notifications.update_many(query, {"$set": {"read": True}})
+        return Response({"message": f"{result.modified_count} notification(s) marked as read"}, status=200)
 
     except Exception as e:
         return Response({"error": "Failed to mark notifications as read", "details": str(e)}, status=500)
 
 
+# -------------------------
+# Get user profile
+# -------------------------
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def get_user_profile(request):
     try:
-        user = users_collection.find_one({"_id": ObjectId(request.user["_id"])}, {"password": 0, "verification_token": 0, "verification_code": 0})
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        user = get_user_from_token(token)
         if not user:
+            return Response({"error": "Forbidden: Invalid token"}, status=403)
+
+        user_doc = users_collection.find_one(
+            {"_id": ObjectId(user["_id"])},
+            {"password": 0, "verification_token": 0, "verification_code": 0}
+        )
+        if not user_doc:
             return Response({"error": "User not found"}, status=404)
 
-        user["_id"] = str(user["_id"])
-        return Response({"user": user}, status=200)
+        user_doc["_id"] = str(user_doc["_id"])
+        return Response({"user": user_doc}, status=200)
 
     except Exception as e:
         return Response({"error": "Failed to fetch profile", "details": str(e)}, status=500)
 
 
+# -------------------------
+# Update user profile
+# -------------------------
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def update_user_profile(request):
     try:
-        user_id = request.user["_id"]
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        user = get_user_from_token(token)
+        if not user:
+            return Response({"error": "Forbidden: Invalid token"}, status=403)
+
+        user_id = user["_id"]
         data = request.data
         update_fields = {}
         email_verification_needed = False
@@ -855,7 +1133,7 @@ def update_user_profile(request):
                 return Response({"error": "Username already exists"}, status=400)
             update_fields["username"] = data["username"]
 
-        # Update phone_number
+        # Update phone number
         if "phone_number" in data:
             if users_collection.find_one({"phone_number": data["phone_number"], "_id": {"$ne": ObjectId(user_id)}}):
                 return Response({"error": "Phone number already exists"}, status=400)
@@ -872,12 +1150,10 @@ def update_user_profile(request):
             if users_collection.find_one({"email": data["email"], "_id": {"$ne": ObjectId(user_id)}}):
                 return Response({"error": "Email already exists"}, status=400)
 
-            # Generate verification token/code
             import uuid, random
-            from datetime import datetime, timedelta
             verification_token = str(uuid.uuid4())
             verification_code = str(random.randint(100000, 999999))
-            expires_at = datetime.now() + timedelta(hours=24)
+            expires_at = datetime.utcnow() + timedelta(hours=24)
 
             update_fields.update({
                 "new_email": data["email"],
@@ -892,35 +1168,26 @@ def update_user_profile(request):
         if not update_fields:
             return Response({"message": "No valid fields to update"}, status=400)
 
-        # Update timestamp
-        from datetime import datetime
-        update_fields["updated_at"] = datetime.now().isoformat()
-
-        # Update DB
+        update_fields["updated_at"] = datetime.utcnow().isoformat()
         users_collection.update_one({"_id": ObjectId(user_id)}, {"$set": update_fields})
 
-        # Send verification email if email changed
         if email_verification_needed:
-            from django.template.loader import render_to_string
-            from django.core.mail import send_mail
-
             verification_link = f"http://localhost:8000/api/verify/?token={verification_token}"
             html_content = render_to_string('emails/verification.html', {
-                'user': {"username": request.user["username"]},
+                'user': {"username": user["username"]},
                 'code': verification_code,
                 'link': verification_link
             })
 
             send_mail(
-                subject=f"Verify your new email",
+                subject="Verify your new email",
                 message=f"Your email client does not support HTML. Verification code: {verification_code}",
                 from_email="Luminan Support <support@luminan.com>",
                 recipient_list=[data["email"]],
                 html_message=html_content,
                 fail_silently=False
             )
-
-            return Response({"message": "Profile updated successfully. Please verify your new email."}, status=200)
+            return Response({"message": "Profile updated. Please verify your new email."}, status=200)
 
         return Response({"message": "Profile updated successfully"}, status=200)
 
@@ -928,8 +1195,11 @@ def update_user_profile(request):
         return Response({"error": "Failed to update profile", "details": str(e)}, status=500)
 
 
+# -------------------------
+# Verify new email
+# -------------------------
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def verify_new_email(request):
     try:
         token = request.data.get("token")
@@ -941,10 +1211,9 @@ def verify_new_email(request):
             return Response({"error": "Invalid or expired verification token"}, status=400)
 
         expires_at_str = user.get("verification_expires_at")
-        if not expires_at_str or datetime.fromisoformat(expires_at_str) < datetime.now():
+        if not expires_at_str or datetime.utcnow() > datetime.fromisoformat(expires_at_str):
             return Response({"error": "Verification token has expired"}, status=400)
 
-        # Update email
         new_email = user.get("new_email")
         if new_email:
             users_collection.update_one(
@@ -960,45 +1229,44 @@ def verify_new_email(request):
         return Response({"error": "Failed to verify email", "details": str(e)}, status=500)
 
 
-
+# -------------------------
+# App trust endpoints
+# -------------------------
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_trust_count(request):
     trust_doc = db.app_trust.find_one({"_id": "app_trust"})
     if not trust_doc:
         return Response({"trusted_users": 0, "trusted_drivers": 0}, status=200)
-
     return Response({
         "trusted_users": len(trust_doc.get("trusted_users", [])),
         "trusted_drivers": len(trust_doc.get("trusted_drivers", []))
     }, status=200)
 
 
-
-
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def trust_app(request):
-    user_type = request.data.get("user_type")  # "user" or "driver"
-    user_id = request.user.get("user_id") if user_type == "user" else request.user.get("driver_id")
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = get_user_from_token(token)
+    if not user:
+        return Response({"error": "Forbidden: Invalid token"}, status=403)
 
-    if not user_id or user_type not in ["user", "driver"]:
-        return Response({"error": "Invalid user_type or user_id"}, status=400)
+    user_type = request.data.get("user_type")
+    if user_type not in ["user", "driver"]:
+        return Response({"error": "Invalid user_type"}, status=400)
 
+    user_id = user["_id"]
     trust_doc = db.app_trust.find_one({"_id": "app_trust"})
     if not trust_doc:
-        # Create initial document
         trust_doc = {"_id": "app_trust", "trusted_users": [], "trusted_drivers": []}
         db.app_trust.insert_one(trust_doc)
 
-    # Check if already trusted
     key = "trusted_users" if user_type == "user" else "trusted_drivers"
     if user_id in trust_doc.get(key, []):
         return Response({"message": "You already trusted the app"}, status=200)
 
-    # Add user_id
     db.app_trust.update_one({"_id": "app_trust"}, {"$push": {key: user_id}})
-
     return Response({"message": "Thank you for trusting the app"}, status=200)
 
 
@@ -1013,7 +1281,29 @@ def trust_app(request):
 
 
 
+# Helper function to send notification
+def send_notification(user_id, type_, message, order_id=None):
+    notifications.insert_one({
+        "user_id": ObjectId(user_id),
+        "type": type_,
+        "message": message,
+        "order_id": ObjectId(order_id) if order_id else None,
+        "read": False,
+        "created_at": datetime.now(LOCAL_TZ).isoformat()
+    })
 
+
+
+# Helper function to send notification
+def send_notification(user_id, type_, message, order_id=None):
+    notifications.insert_one({
+        "user_id": ObjectId(user_id),
+        "type": type_,
+        "message": message,
+        "order_id": ObjectId(order_id) if order_id else None,
+        "read": False,
+        "created_at": datetime.now(LOCAL_TZ).isoformat()
+    })
 
 
 
@@ -1032,1145 +1322,384 @@ def trust_app(request):
 
 
 
-drivers_collection = db.get_collection("drivers")
-companies_collection = db.get_collection("companies")  
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def register_company(request):
-    try:
-        data = request.data
-
-        # Required fields
-        required_fields = ["company_name", "company_id", "company_registration_number", "email", "phone_number"]
-        missing_fields = [f for f in required_fields if f not in data or not data[f]]
-        if missing_fields:
-            return Response({"error": f"Missing required fields: {', '.join(missing_fields)}"}, status=400)
-
-        # Check uniqueness
-        existing_company = companies_collection.find_one({
-            "$or": [
-                {"company_id": data['company_id']},
-                {"company_registration_number": data['company_registration_number']},
-                {"email": data['email']}
-            ]
-        })
-        if existing_company:
-            return Response({"error": "Company ID, registration number, or email already exists"}, status=400)
-
-        # Add defaults
-        data.update({
-            "created_at": datetime.now(),
-            "status": "active"  # optional, can be used for approval workflow
-        })
-
-        # Insert into DB
-        inserted_id = companies_collection.insert_one(data).inserted_id
-
-        # Optional: send welcome email
-        html_content = render_to_string('emails/company_welcome.html', {
-            'company': data
-        })
-        send_mail(
-            subject=f"Welcome to Luminan, {data['company_name']}!",
-            message="Welcome to Luminan platform!",
-            from_email="Luminan Support <support@luminan.com>",
-            recipient_list=[data['email']],
-            html_message=html_content,
-            fail_silently=False
-        )
-
-        return Response({
-            "message": "Company registered successfully.",
-            "company_id": str(inserted_id)
-        }, status=201)
-
-    except Exception as e:
-        return Response({"error": "Company registration failed", "details": str(e)}, status=500)
-
-
-
+# ---------- REGISTER DRIVER ----------
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_driver(request):
+    data = request.data
     try:
-        data = request.data
+        # Validate required fields
+        required_fields = ["username", "email", "password", "confirm_password",]
+        for field in required_fields:
+            if not data.get(field):
+                return Response({"error": f"{field} is required"}, status=400)
 
-        # Required fields for driver registration
-        required_fields = [
-            "username", "email", "phone_number", "password", "confirm_password",
-            "company_id", "company_registration_number", "operation_area"
-        ]
-        missing_fields = [f for f in required_fields if f not in data or not data[f]]
-        if missing_fields:
-            return Response({"error": f"Missing required fields: {', '.join(missing_fields)}"}, status=400)
-
-        if data['password'] != data['confirm_password']:
+        if data["password"] != data["confirm_password"]:
             return Response({"error": "Passwords do not match"}, status=400)
 
-        # Check if company exists
-        company = companies_collection.find_one({
-            "company_id": data['company_id'],
-            "company_registration_number": data['company_registration_number']
-        })
-        if not company:
-            return Response({"error": "Company not found or invalid credentials"}, status=400)
-
-        # Check driver uniqueness (username, email, phone)
-        existing_driver = drivers_collection.find_one({
-            "$or": [
-                {"username": data['username']},
-                {"email": data['email']},
-                {"phone_number": data['phone_number']}
-            ]
-        })
-        if existing_driver:
-            return Response({"error": "Username, email, or phone number already exists"}, status=400)
+        # Check for existing driver in drivers_collection
+        if drivers_collection.find_one({"$or": [{"username": data["username"]}, {"email": data["email"]}]}):
+            return Response({"error": "Username or email already exists"}, status=400)
 
         # Hash password
-        hashed_pw = hashpw(data['password'].encode(), gensalt())
-        data['password'] = hashed_pw
-        data.pop('confirm_password', None)
+        hashed_pw = bcrypt.hashpw(data["password"].encode(), bcrypt.gensalt())
 
-        # Verification setup
-        verification_token = str(uuid.uuid4())
-        verification_code = str(random.randint(100000, 999999))
-        expires_at = datetime.now() + timedelta(hours=24)
+        # Create driver document
+        driver_doc = {
+            "username": data["username"],
+            "email": data["email"],
+            "password": hashed_pw,
+            "role": "driver",
+            "auth_token": secrets.token_hex(32),
+            "created_at": datetime.now().isoformat(),
+        }
 
-        # Add defaults
-        data.update({
-            "created_at": datetime.now(),
-            "status": "driver",
-            "verified": False,
-            "verification_token": verification_token,
-            "verification_code": verification_code,
-            "verification_expires_at": expires_at.isoformat()
-        })
+        inserted_id = drivers_collection.insert_one(driver_doc).inserted_id
 
-        # Insert driver
-        inserted_id = drivers_collection.insert_one(data).inserted_id
+        # Return driver object (without password)
+        driver_doc["_id"] = str(inserted_id)
+        driver_doc.pop("password")
 
-        # Prepare verification email
-        verification_link = f"http://localhost:8000/api/driver/verify/?token={verification_token}"
-        html_content = render_to_string('emails/driver_welcome.html', {
-            'user': data,
-            'code': verification_code,
-            'link': verification_link
-        })
-
-        send_mail(
-            subject=f"Welcome to Luminan, {data['username']}!",
-            message=f"Your email client does not support HTML. Your verification code is: {verification_code}",
-            from_email="Luminan Support <support@luminan.com>",
-            recipient_list=[data['email']],
-            html_message=html_content,
-            fail_silently=False
-        )
-
-        return Response({
-            "message": "Driver registered successfully. Please check your email to verify your account.",
-            "driver_id": str(inserted_id)
-        }, status=201)
+        return Response({"driver": driver_doc}, status=201)
 
     except Exception as e:
-        return Response({"error": "Driver registration failed", "details": str(e)}, status=500)
+        return Response({"error": "Registration failed", "details": str(e)}, status=500)
 
 
-
-
-
-def create_jwt_for_driver(driver):
-    refresh = RefreshToken()
-    refresh['driver_id'] = str(driver["_id"])
-    refresh['username'] = driver["username"]
-    refresh['status'] = driver.get("status", "driver")
-    refresh['company_id'] = driver.get("company_id", "")
-    return {
-        "refresh": str(refresh),
-        "access": str(refresh.access_token)
-    }
-
+# ---------- LOGIN DRIVER ----------
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_driver(request):
     try:
-        identifier = request.data.get("identifier")  # username, email, or phone
-        password = request.data.get("password")
+        data = request.data
+        identifier = data.get("identifier")  # can be username or email
+        password = data.get("password")
 
         if not identifier or not password:
             return Response({"error": "Identifier and password are required"}, status=400)
 
-        # Find driver
+        # Find driver by username or email in drivers_collection
         driver = drivers_collection.find_one({
             "$or": [
                 {"username": identifier},
-                {"email": identifier},
-                {"phone_number": identifier}
+                {"email": identifier}
             ]
         })
 
         if not driver:
-            return Response({"error": "Invalid username/email/phone or password"}, status=401)
+            return Response({"error": "Invalid username/email or password"}, status=401)
 
-        # Check verified
-        if not driver.get("verified", False):
-            return Response({"error": "Account not verified. Please verify your account first."}, status=403)
+        # Verify password
+        stored_password = driver['password']
+        if isinstance(stored_password, str):
+            stored_password = stored_password.encode('utf-8')
 
-        # Check failed login attempts
-        failed_attempts = driver.get("failed_attempts", 0)
-        last_failed = driver.get("last_failed_login")
-        if failed_attempts >= MAX_FAILED_ATTEMPTS:
-            if last_failed and datetime.now() < datetime.fromisoformat(last_failed) + timedelta(minutes=LOCKOUT_TIME_MINUTES):
-                return Response({"error": "Account temporarily locked due to multiple failed login attempts. Try again later."}, status=403)
+        if not checkpw(password.encode('utf-8'), stored_password):
+            return Response({"error": "Invalid username/email or password"}, status=401)
 
-        # Check password
-        if not checkpw(password.encode(), driver['password']):
-            drivers_collection.update_one(
-                {"_id": driver["_id"]},
-                {"$inc": {"failed_attempts": 1}, "$set": {"last_failed_login": datetime.now().isoformat()}}
-            )
-            return Response({"error": "Invalid username/email/phone or password"}, status=401)
-
-        # Reset failed attempts on successful login
+        # Generate new auth token
+        auth_token = secrets.token_hex(32)
         drivers_collection.update_one(
             {"_id": driver["_id"]},
-            {"$set": {"failed_attempts": 0, "last_failed_login": None, "last_login": datetime.now().isoformat()}}
+            {"$set": {"auth_token": auth_token, "last_login": datetime.utcnow()}}
         )
 
-        tokens = create_jwt_for_driver(driver)
-
-        return Response({
-            "message": "Login successful",
-            "driver_id": str(driver["_id"]),
+        # Return driver object
+        driver_resp = {
+            "id": str(driver["_id"]),
             "username": driver["username"],
-            "status": driver.get("status", "driver"),
-            "company_id": driver.get("company_id"),
-            "tokens": tokens
-        }, status=200)
+            "email": driver.get("email"),
+            "role": driver.get("role", "driver"),
+            "auth_token": auth_token,
+        }
+
+        return Response({"driver": driver_resp}, status=200)
 
     except Exception as e:
         return Response({"error": "Login failed", "details": str(e)}, status=500)
 
 
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def verify_driver(request):
+# ---------- Helper function to get driver from token ----------
+def get_driver_from_token(request):
+    """
+    Extract driver from Authorization header using Bearer token convention.
+    Returns (driver, None) on success or (None, Response) on failure.
+    """
     try:
-        token = request.data.get("token")
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header.replace("Bearer ", "").strip()
+
         if not token:
-            return Response({"error": "Verification token is required"}, status=400)
+            return None, Response({"error": "Authorization token required"}, status=401)
 
-        driver = drivers_collection.find_one({"verification_token": token})
+        driver = drivers_collection.find_one({"auth_token": token})
         if not driver:
-            return Response({"error": "Invalid or expired verification token"}, status=400)
+            return None, Response({"error": "Invalid or expired token"}, status=401)
 
-        # Mark as verified and remove token
-        drivers_collection.update_one(
-            {"_id": driver["_id"]},
-            {"$set": {"verified": True}, "$unset": {"verification_token": "", "verification_expires_at": ""}}
-        )
-
-        return Response({"message": "Driver account verified successfully."}, status=200)
+        return driver, None
 
     except Exception as e:
-        return Response({"error": "Verification failed", "details": str(e)}, status=500)
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def verify_driver_code(request):
-    try:
-        code = request.data.get("code")
-        if not code:
-            return Response({"error": "Verification code is required"}, status=400)
-
-        driver = drivers_collection.find_one({"verification_code": code})
-        if not driver:
-            return Response({"error": "Invalid verification code"}, status=400)
-
-        # Mark as verified and remove token/code
-        drivers_collection.update_one(
-            {"_id": driver["_id"]},
-            {"$set": {"verified": True}, "$unset": {"verification_token": "", "verification_code": "", "verification_expires_at": ""}}
-        )
-
-        return Response({"message": "Driver account verified successfully."}, status=200)
-
-    except Exception as e:
-        return Response({"error": "Verification failed", "details": str(e)}, status=500)        
+        return None, Response({"error": "Token parsing failed", "details": str(e)}, status=400)
 
 
 
+from bson import ObjectId
+from datetime import datetime
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 
+def safe_datetime(dt):
+    if not dt:
+        return None
+    return dt.isoformat() if not isinstance(dt, str) else dt
 
+def get_updated_order(order_id):
+    order = gas_orders.find_one({"_id": ObjectId(order_id)})
+    if not order:
+        return None
+    return {
+        "order_id": str(order.get("_id")),
+        "product_id": str(order.get("product_id")) if order.get("product_id") else None,
+        "quantity": order.get("quantity", 0),
+        "total_price": order.get("total_price"),
+        "weight": order.get("weight", 1),
+        "unit_price": order.get("unit_price") or drivers_collection.get("price_per_kg", 2),
+        "order_status": order.get("status", "pending"),
+        "delivery_address": order.get("delivery_address"),
+        "scheduled_time": order.get("scheduled_time"),
+        "payment_method": order.get("payment_method"),
+        "notes": order.get("notes"),
+        "created_at": safe_datetime(order.get("created_at")),
+        "updated_at": safe_datetime(order.get("updated_at")),
+        "delivered_at": safe_datetime(order.get("delivered_at")),
+        "assigned_driver_id": str(order.get("assigned_driver_id")) if order.get("assigned_driver_id") else None,
+        "customer_id": str(order.get("customer_id")) if order.get("customer_id") else None
+    }
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def driver_forgot_password(request):
-    email = request.data.get("email")
-    if not email:
-        return Response({"error": "Email is required"}, status=400)
-
-    driver = drivers_collection.find_one({"email": email})
-
-    # Prevent account enumeration: always respond with success
-    if not driver:
-        return Response({"message": "If this account exists, a reset code has been sent."}, status=200)
-
-    # Rate-limiting
-    now = datetime.now()
-    last_request = driver.get("last_forgot_request")
-    request_count = driver.get("forgot_request_count", 0)
-
-    if last_request:
-        last_request_dt = datetime.fromisoformat(last_request)
-        if now - last_request_dt < timedelta(minutes=FORGOT_REQUEST_WINDOW_MINUTES):
-            if request_count >= MAX_FORGOT_REQUESTS:
-                return Response({"error": f"Too many password reset requests. Try again later."}, status=429)
-        else:
-            request_count = 0  # reset count after window
-
-    # Generate 6-digit reset code
-    reset_code_plain = str(random.randint(100000, 999999))
-    reset_code_hashed = hashpw(reset_code_plain.encode(), gensalt())
-    expires_at = now + timedelta(minutes=RESET_CODE_EXPIRY_MINUTES)
-
-    # Update driver document
-    drivers_collection.update_one(
-        {"_id": driver["_id"]},
-        {"$set": {
-            "reset_code": reset_code_hashed,
-            "reset_code_expiry": expires_at.isoformat(),
-            "last_forgot_request": now.isoformat(),
-            "forgot_request_count": request_count + 1
-        }}
-    )
-
-    # Send email with the plain reset code
-    send_mail(
-        subject="Luminan Driver Password Reset Code",
-        message=f"Your password reset code is: {reset_code_plain}\nThis code expires in {RESET_CODE_EXPIRY_MINUTES} minutes.",
-        from_email="Luminan Support <no-reply@luminan.com>",
-        recipient_list=[email],
-        fail_silently=False
-    )
-
-    return Response({"message": "If this account exists, a reset code has been sent."}, status=200)
-
-
-
-
-
-
-
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def driver_reset_password(request):
-    try:
-        code = request.data.get("code")
-        new_password = request.data.get("new_password")
-        confirm_password = request.data.get("confirm_password")
-
-        if not all([code, new_password, confirm_password]):
-            return Response({"error": "Code, new password, and confirm password are required"}, status=400)
-        if new_password != confirm_password:
-            return Response({"error": "Passwords do not match"}, status=400)
-
-        # Find driver with hashed code
-        driver = drivers_collection.find_one({"reset_code": {"$exists": True}})
-        if not driver or not checkpw(code.encode(), driver["reset_code"]):
-            return Response({"error": "Invalid or expired code"}, status=400)
-
-        # Check expiry
-        expiry_str = driver.get("reset_code_expiry")
-        if not expiry_str or datetime.now() > datetime.fromisoformat(expiry_str):
-            return Response({"error": "Reset code has expired"}, status=400)
-
-        # Hash the new password
-        hashed_pw = hashpw(new_password.encode(), gensalt())
-
-        # Update driver password and remove reset code fields
-        drivers_collection.update_one(
-            {"_id": driver["_id"]},
-            {"$set": {"password": hashed_pw}, "$unset": {"reset_code": "", "reset_code_expiry": ""}}
-        )
-
-        return Response({"message": "Password reset successfully."}, status=200)
-
-    except Exception as e:
-        return Response({"error": "Password reset failed", "details": str(e)}, status=500)
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def logout_driver(request):
-    try:
-        refresh_token = request.data.get("refresh")
-        if not refresh_token:
-            return Response({"error": "Refresh token is required"}, status=400)
-
-        # Blacklist the refresh token
-        token = RefreshToken(refresh_token)
-        token.blacklist()
-
-        return Response({"message": "Driver logged out successfully."}, status=200)
-
-    except Exception as e:
-        return Response({"error": "Logout failed", "details": str(e)}, status=500)
-
-
-
-
-
-
-
-
-@api_view(['DELETE'])
-@permission_classes([IsAuthenticated])
-def delete_driver_account(request):
-    try:
-        driver_id = request.user.driver_id  # JWT contains driver_id
-        if not driver_id:
-            return Response({"error": "Invalid authentication"}, status=401)
-
-        # Delete driver account
-        result = drivers_collection.delete_one({"_id": ObjectId(driver_id)})
-        if result.deleted_count == 0:
-            return Response({"error": "Driver not found"}, status=404)
-
-        return Response({"message": "Driver account deleted successfully."}, status=200)
-
-    except Exception as e:
-        return Response({"error": "Account deletion failed", "details": str(e)}, status=500)
-
-
-
-
-
-# Helper function to send notification
-def send_notification(user_id, type_, message, order_id=None):
-    notifications.insert_one({
-        "user_id": ObjectId(user_id),
-        "type": type_,
-        "message": message,
-        "order_id": ObjectId(order_id) if order_id else None,
-        "read": False,
-        "created_at": datetime.now(LOCAL_TZ).isoformat()
-    })
+# ---------------- PATCH ENDPOINTS ----------------
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def assign_driver(request, order_id):
+@permission_classes([AllowAny])
+def confirm_order(request, order_id):
+    driver, error_resp = get_driver_from_token(request)
+    if error_resp: return error_resp
+
     try:
-        driver_id = request.data.get("driver_id")
-        if not driver_id:
-            return Response({"error": "driver_id is required"}, status=400)
-
-        # Convert IDs
-        try:
-            oid_order = ObjectId(order_id)
-            oid_driver = ObjectId(driver_id)
-        except:
-            return Response({"error": "Invalid order_id or driver_id"}, status=400)
-
-        # Fetch order
-        order = gas_orders.find_one({"_id": oid_order})
+        oid_order = ObjectId(order_id)
+        order = gas_orders.find_one({"_id": oid_order, "assigned_driver_id": driver["_id"]})
         if not order:
-            return Response({"error": "Order not found"}, status=404)
+            return Response({"error": "Order not found or not assigned to you"}, status=404)
 
-        # Fetch driver
-        driver = drivers_collection.find_one({"_id": oid_driver})
-        if not driver:
-            return Response({"error": "Driver not found"}, status=404)
-
-        # Check driver availability
-        if driver.get("status") != "available":
-            return Response({"error": "Driver is not available"}, status=400)
-
-        # Update order with assigned driver
-        now = datetime.now(LOCAL_TZ)
         gas_orders.update_one(
             {"_id": oid_order},
-            {"$set": {"assigned_driver_id": oid_driver, "updated_at": now.isoformat()}}
+            {"$set": {"status": "confirmed", "updated_at": datetime.now()}}
         )
 
-        # Mark driver as busy
-        drivers_collection.update_one(
-            {"_id": oid_driver},
-            {"$set": {"status": "busy"}}
-        )
-
-        # ✅ Send notifications
-        # Notify the customer
-        send_notification(
-            user_id=order["customer_id"],
-            type_="driver_assigned",
-            message=f"A driver has been assigned to your order {order_id}.",
-            order_id=order_id
-        )
-
-        # Notify the driver
-        send_notification(
-            user_id=driver_id,
-            type_="new_order",
-            message=f"You have been assigned to order {order_id}.",
-            order_id=order_id
-        )
-
-        return Response({
-            "message": "Driver assigned successfully and notifications sent",
-            "order_id": order_id,
-            "driver_id": driver_id
-        }, status=200)
-
+        updated_order = get_updated_order(order_id)
+        return Response({"message": "Order confirmed successfully", "order": updated_order}, status=200)
     except Exception as e:
-        return Response({"error": "Failed to assign driver", "details": str(e)}, status=500)
-
-
-
-
-# Helper function to send notification
-def send_notification(user_id, type_, message, order_id=None):
-    notifications.insert_one({
-        "user_id": ObjectId(user_id),
-        "type": type_,
-        "message": message,
-        "order_id": ObjectId(order_id) if order_id else None,
-        "read": False,
-        "created_at": datetime.now(LOCAL_TZ).isoformat()
-    })
+        return Response({"error": "Failed to confirm order", "details": str(e)}, status=500)
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def update_payment_status(request, order_id):
+@permission_classes([AllowAny])
+def cancel_order(request, order_id):
+    driver, error_resp = get_driver_from_token(request)
+    if error_resp: return error_resp
+
     try:
-        new_status = request.data.get("payment_status")
-        if not new_status:
-            return Response({"error": "payment_status is required"}, status=400)
-
-        allowed_statuses = ["pending", "paid", "failed"]
-        if new_status not in allowed_statuses:
-            return Response({"error": f"Invalid payment_status. Allowed: {allowed_statuses}"}, status=400)
-
-        # Convert order_id to ObjectId
-        try:
-            oid = ObjectId(order_id)
-        except:
-            return Response({"error": "Invalid order ID format"}, status=400)
-
-        # Fetch order
-        order = gas_orders.find_one({"_id": oid})
+        oid_order = ObjectId(order_id)
+        order = gas_orders.find_one({"_id": oid_order, "assigned_driver_id": driver["_id"]})
         if not order:
-            return Response({"error": "Order not found"}, status=404)
+            return Response({"error": "Order not found or not assigned to you"}, status=404)
 
-        # Update payment status and timestamp
-        now = datetime.now(LOCAL_TZ)
+        reason = request.data.get("reason", "Cancelled by driver")
         gas_orders.update_one(
-            {"_id": oid},
-            {"$set": {"payment_status": new_status, "updated_at": now.isoformat()}}
+            {"_id": oid_order},
+            {"$set": {
+                "status": "cancelled",
+                "cancel_reason": reason,
+                "updated_at": datetime.now()
+            }}
         )
 
-        # ✅ Send notification to the customer
-        send_notification(
-            user_id=order["customer_id"],
-            type_="payment_status",
-            message=f"Your payment for order {order_id} is now '{new_status}'",
-            order_id=order_id
-        )
+        drivers_collection.update_one({"_id": driver["_id"]}, {"$set": {"status": "available"}})
 
-        return Response({
-            "message": f"Payment status updated to {new_status}",
-            "order_id": order_id
-        }, status=200)
-
+        updated_order = get_updated_order(order_id)
+        return Response({"message": "Order cancelled successfully", "order": updated_order}, status=200)
     except Exception as e:
-        return Response({"error": "Failed to update payment status", "details": str(e)}, status=500)
+        return Response({"error": "Failed to cancel order", "details": str(e)}, status=500)
 
+@api_view(['PATCH'])
+@permission_classes([AllowAny])
+def mark_delivered(request, order_id):
+    driver, error_resp = get_driver_from_token(request)
+    if error_resp: return error_resp
+
+    try:
+        oid_order = ObjectId(order_id)
+        order = gas_orders.find_one({"_id": oid_order, "assigned_driver_id": driver["_id"]})
+        if not order:
+            return Response({"error": "Order not found or not assigned to you"}, status=404)
+
+        gas_orders.update_one(
+            {"_id": oid_order},
+            {"$set": {
+                "status": "delivered",
+                "delivered_at": datetime.now(),
+                "updated_at": datetime.now()
+            }}
+        )
+
+        drivers_collection.update_one({"_id": driver["_id"]}, {"$set": {"status": "available"}})
+
+        updated_order = get_updated_order(order_id)
+        return Response({"message": "Order marked as delivered", "order": updated_order}, status=200)
+    except Exception as e:
+        return Response({"error": "Failed to mark order as delivered", "details": str(e)}, status=500)
+
+# ---------------- GET ENDPOINT ----------------
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def list_filtered_orders(request):
+@permission_classes([AllowAny])
+def driver_assigned_orders(request):
+    driver, error_resp = get_driver_from_token(request)
+    if error_resp:
+        return error_resp
+
     try:
-        query = {}
-
-        # Filters from query params
-        status = request.GET.get("order_status")
-        payment_status = request.GET.get("payment_status")
-        driver_id = request.GET.get("driver_id")
-        customer_id = request.GET.get("customer_id")
-
-        if status:
-            query["order_status"] = status
-        if payment_status:
-            query["payment_status"] = payment_status
-        if driver_id:
-            query["assigned_driver_id"] = ObjectId(driver_id)
-        if customer_id:
-            query["customer_id"] = ObjectId(customer_id)
-
-        # Optional date range
-        start_date = request.GET.get("start_date")
-        end_date = request.GET.get("end_date")
-        if start_date or end_date:
-            query["created_at"] = {}
-            if start_date:
-                query["created_at"]["$gte"] = start_date
-            if end_date:
-                query["created_at"]["$lte"] = end_date
-
-        # Fetch orders
-        orders_cursor = gas_orders.find(query).sort("created_at", -1)
+        driver_id = ObjectId(driver["_id"])
+        orders_cursor = gas_orders.find({"assigned_driver_id": driver_id})
         orders = []
+
         for order in orders_cursor:
+            # Use order's stored unit_price and total_price
+            unit_price = order.get("unit_price") or 0
+            weight = order.get("weight", 1)
+            quantity = order.get("quantity", 1)
+            driver_surcharge = order.get("driver_surcharge", 0)
+            total_price = order.get("total_price") or (unit_price * weight * quantity + driver_surcharge)
+
+            product_name = order.get("product_name")
+
+            items = [{
+                "name": product_name or "Custom Gas Order",
+                "quantity": quantity,
+                "description": order.get("product_description") if product_name else order.get("notes", ""),
+                "total_price": total_price,
+                "weight": weight,
+                "unit_price": unit_price,
+                "driver_surcharge": driver_surcharge,
+            }]
+
+            # Customer info
+            customer_name = order.get("customer_name") or "N/A"
+            customer_phone = order.get("customer_phone") or "N/A"
+            customer_email = order.get("customer_email") or "N/A"
+
             orders.append({
-                "order_id": str(order["_id"]),
-                "order_status": order["order_status"],
-                "payment_status": order["payment_status"],
+                "order_id": str(order.get("_id")),
+                "customer": {
+                    "name": customer_name,
+                    "phone": customer_phone,
+                    "email": customer_email,
+                },
+                "items": items,
+                "delivery_address": order.get("delivery_address", "N/A"),
+                "notes": order.get("notes", "None"),
+                "order_status": order.get("status", "pending"),
+                "total_price": total_price,
+                "scheduled_time": safe_datetime(order.get("scheduled_time")),
+                "payment_method": order.get("payment_method", "N/A"),
+                "created_at": safe_datetime(order.get("created_at")),
+                "updated_at": safe_datetime(order.get("updated_at")),
+                "delivered_at": safe_datetime(order.get("delivered_at")),
                 "assigned_driver_id": str(order.get("assigned_driver_id")) if order.get("assigned_driver_id") else None,
-                "customer_id": str(order["customer_id"]),
-                "total_price": order["total_price"],
-                "created_at": order["created_at"]
             })
 
         return Response({"orders": orders}, status=200)
 
     except Exception as e:
-        return Response({"error": "Failed to fetch filtered orders", "details": str(e)}, status=500)     
+        print(">>> Exception in driver_assigned_orders:", e)
+        return Response(
+            {"error": "Failed to fetch driver orders", "details": str(e)},
+            status=500
+        )
+
+
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_driver_profile(request):
+@permission_classes([AllowAny])
+def list_all_drivers(request):
+    print("Authorization header:", request.headers.get("Authorization"))
     try:
-        driver = drivers_collection.find_one(
-            {"_id": ObjectId(request.user["_id"])},
-            {"password": 0, "verification_token": 0, "verification_code": 0}
-        )
-        if not driver:
-            return Response({"error": "Driver not found"}, status=404)
+        drivers_cursor = drivers_collection.find({})
+        drivers_list = list(drivers_cursor)
 
-        driver["_id"] = str(driver["_id"])
-        return Response({"driver": driver}, status=200)
+        drivers = []
+        for d in drivers_list:
+            company = companies_collection.find_one({"company_id": d.get("company_id")})
+            company_name = company.get("name", "Unknown Company") if company else "Unknown Company"
+
+            drivers.append({
+    "driver_id": str(d["_id"]),
+    "username": d.get("username", ""),
+    "company": {"company_name": company_name},  # fix: send as object
+    "price_per_kg": d.get("price_per_kg", 0),
+    "price_per_km": d.get("price_per_km", 0),
+    "rating": d.get("rating", 0),
+    "reviews_count": d.get("reviews_count", 0),
+    "completed_deliveries": d.get("completed_deliveries", 0),
+    "location": d.get("operation_area", ""),
+    "vehicle_type": d.get("vehicle_type", "")
+})
+
+
+        return Response({"drivers": drivers}, status=200)
 
     except Exception as e:
-        return Response({"error": "Failed to fetch profile", "details": str(e)}, status=500)
+        print("Error fetching drivers:", e)
+        return Response({"error": "Failed to fetch drivers", "details": str(e)}, status=500)
 
 
+# ---------- SET PRICE PER KG ----------
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def update_driver_profile(request):
+@permission_classes([AllowAny])  # auth is manually checked
+def set_price_per_kg(request):
+    # --- Print Authorization headers ---
+    auth_header = request.headers.get("Authorization")
+    print("Received Authorization header:", auth_header)
+
+    driver, error_resp = get_driver_from_token(request)
+    if error_resp:
+        print("Driver authentication failed")
+        return error_resp
+
+    print(f"Authenticated driver: {driver.get('username', 'UNKNOWN')} (ID: {driver['_id']})")
+
     try:
-        driver_id = request.user["_id"]
-        data = request.data
-        update_fields = {}
-        email_verification_needed = False
-
-        # Update username
-        if "username" in data:
-            if drivers_collection.find_one({"username": data["username"], "_id": {"$ne": ObjectId(driver_id)}}):
-                return Response({"error": "Username already exists"}, status=400)
-            update_fields["username"] = data["username"]
-
-        # Update phone_number
-        if "phone_number" in data:
-            if drivers_collection.find_one({"phone_number": data["phone_number"], "_id": {"$ne": ObjectId(driver_id)}}):
-                return Response({"error": "Phone number already exists"}, status=400)
-            update_fields["phone_number"] = data["phone_number"]
-
-        # Update password
-        if "password" in data:
-            from bcrypt import hashpw, gensalt
-            hashed_pw = hashpw(data["password"].encode(), gensalt())
-            update_fields["password"] = hashed_pw
-
-        # Update email with verification
-        if "email" in data:
-            if drivers_collection.find_one({"email": data["email"], "_id": {"$ne": ObjectId(driver_id)}}):
-                return Response({"error": "Email already exists"}, status=400)
-
-            # Generate verification token/code
-            import uuid, random
-            from datetime import datetime, timedelta
-            verification_token = str(uuid.uuid4())
-            verification_code = str(random.randint(100000, 999999))
-            expires_at = datetime.now() + timedelta(hours=24)
-
-            update_fields.update({
-                "new_email": data["email"],
-                "email_verified": False,
-                "verification_token": verification_token,
-                "verification_code": verification_code,
-                "verification_expires_at": expires_at.isoformat()
-            })
-
-            email_verification_needed = True
-
-        if not update_fields:
-            return Response({"message": "No valid fields to update"}, status=400)
-
-        # Update timestamp
-        from datetime import datetime
-        update_fields["updated_at"] = datetime.now().isoformat()
-
-        # Update DB
-        drivers_collection.update_one({"_id": ObjectId(driver_id)}, {"$set": update_fields})
-
-        # Send verification email if email changed
-        if email_verification_needed:
-            from django.template.loader import render_to_string
-            from django.core.mail import send_mail
-
-            verification_link = f"http://localhost:8000/api/driver/verify/?token={verification_token}"
-            html_content = render_to_string('emails/driver_welcome.html', {
-                'user': {"username": request.user["username"]},
-                'code': verification_code,
-                'link': verification_link
-            })
-
-            send_mail(
-                subject=f"Verify your new email",
-                message=f"Your email client does not support HTML. Verification code: {verification_code}",
-                from_email="Luminan Support <support@luminan.com>",
-                recipient_list=[data["email"]],
-                html_message=html_content,
-                fail_silently=False
-            )
-
-            return Response({"message": "Profile updated. Please verify your new email."}, status=200)
-
-        return Response({"message": "Profile updated successfully"}, status=200)
-
-    except Exception as e:
-        return Response({"error": "Failed to update profile", "details": str(e)}, status=500)
-
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def verify_driver_new_email(request):
-    try:
-        token = request.data.get("token")
-        if not token:
-            return Response({"error": "Verification token is required"}, status=400)
-
-        driver = drivers_collection.find_one({"verification_token": token})
-        if not driver:
-            return Response({"error": "Invalid or expired verification token"}, status=400)
-
-        expires_at_str = driver.get("verification_expires_at")
-        from datetime import datetime
-        if not expires_at_str or datetime.fromisoformat(expires_at_str) < datetime.now():
-            return Response({"error": "Verification token has expired"}, status=400)
-
-        new_email = driver.get("new_email")
-        if new_email:
-            drivers_collection.update_one(
-                {"_id": driver["_id"]},
-                {"$set": {"email": new_email, "email_verified": True},
-                 "$unset": {"new_email": "", "verification_token": "", "verification_code": "", "verification_expires_at": ""}}
-            )
-            return Response({"message": "New email verified successfully"}, status=200)
-
-        return Response({"error": "No email to verify"}, status=400)
-
-    except Exception as e:
-        return Response({"error": "Failed to verify email", "details": str(e)}, status=500)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_driver_profile_with_orders(request):
-    try:
-        driver_id = request.user["_id"]
-
-        # Fetch driver profile (exclude sensitive fields)
-        driver = drivers_collection.find_one(
-            {"_id": ObjectId(driver_id)},
-            {"password": 0, "verification_token": 0, "verification_code": 0}
-        )
-        if not driver:
-            return Response({"error": "Driver not found"}, status=404)
-        
-        driver["_id"] = str(driver["_id"])
-
-        # Optional query params
-        status_filter = request.query_params.get("status")
-        delivery_type_filter = request.query_params.get("delivery_type")
-        search_term = request.query_params.get("search")
-        page = int(request.query_params.get("page", 1))
-        page_size = int(request.query_params.get("page_size", 10))
-        skip = (page - 1) * page_size
-
-        # Build base query
-        query = {"assigned_driver_id": ObjectId(driver_id)}
-        if status_filter:
-            query["order_status"] = status_filter
-        if delivery_type_filter:
-            query["delivery_type"] = delivery_type_filter
-
-        # Fetch all matching orders first
-        orders_cursor = gas_orders.find(query)
-        orders = []
-
-        for o in orders_cursor:
-            # Attach related data for search
-            customer = users_collection.find_one({"_id": o["customer_id"]}, {"username": 1, "phone_number": 1})
-            product = products.find_one({"_id": o["product_id"]}, {"name": 1})
-
-            o["_id"] = str(o["_id"])
-            o["customer_id"] = str(o["customer_id"])
-            o["product_id"] = str(o["product_id"])
-            if o.get("assigned_driver_id"):
-                o["assigned_driver_id"] = str(o["assigned_driver_id"])
-
-            o["customer_name"] = customer.get("username") if customer else ""
-            o["customer_phone"] = customer.get("phone_number") if customer else ""
-            o["product_name"] = product.get("name") if product else ""
-
-            orders.append(o)
-
-        # Apply search filter if provided
-        if search_term:
-            search_term_lower = search_term.lower()
-            orders = [
-                o for o in orders
-                if search_term_lower in o.get("customer_name", "").lower()
-                or search_term_lower in o.get("customer_phone", "").lower()
-                or search_term_lower in o.get("product_name", "").lower()
-            ]
-
-        # Pagination
-        total_orders = len(orders)
-        orders_paginated = orders[skip:skip + page_size]
-
-        driver["assigned_orders"] = orders_paginated
-
-        return Response({
-            "driver": driver,
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total_orders": total_orders,
-                "total_pages": (total_orders + page_size - 1) // page_size
-            }
-        }, status=200)
-
-    except Exception as e:
-        return Response({"error": "Failed to fetch driver profile", "details": str(e)}, status=500)
-
-
-
-
-def update_order_status_by_driver(driver_id, order_id, new_status, allowed_previous_statuses, notification_message):
-    try:
-        # Convert order_id
-        try:
-            oid = ObjectId(order_id)
-        except:
-            return None, {"error": "Invalid order ID format"}, 400
-
-        # Fetch order
-        order = gas_orders.find_one({"_id": oid})
-        if not order:
-            return None, {"error": "Order not found"}, 404
-
-        # Check driver assignment
-        if order.get("driver_id") != driver_id:
-            return None, {"error": "You are not assigned to this order"}, 403
-
-        # Check allowed status transition
-        if order.get("status") not in allowed_previous_statuses:
-            return None, {"error": f"Cannot change order from status '{order.get('status')}' to '{new_status}'"}, 400
-
-        # Update status
-        now = datetime.now(LOCAL_TZ)
-        gas_orders.update_one(
-            {"_id": oid},
-            {"$set": {"status": new_status, "updated_at": now.isoformat()}}
-        )
-
-        # Send notification
-        send_notification(
-            user_id=order["customer_id"],
-            type_="order_status",
-            message=notification_message.format(order_id=order_id),
-            order_id=order_id
-        )
-
-        return True, {"message": f"Order status updated to '{new_status}'", "order_id": order_id}, 200
-
-    except Exception as e:
-        return None, {"error": "Failed to update order status", "details": str(e)}, 500
-
-
-
-
-
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def driver_confirm_order(request, order_id):
-    driver_id = request.user.get("driver_id")
-    return Response(*update_order_status_by_driver(
-        driver_id,
-        order_id,
-        new_status="confirmed",
-        allowed_previous_statuses=["pending", "assigned"],
-        notification_message="Your order {order_id} has been confirmed by the driver."
-    ))
-
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def driver_pickup_order(request, order_id):
-    driver_id = request.user.get("driver_id")
-    return Response(*update_order_status_by_driver(
-        driver_id,
-        order_id,
-        new_status="picked_up",
-        allowed_previous_statuses=["confirmed"],
-        notification_message="Your order {order_id} has been picked up by the driver."
-    ))
-
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def driver_deliver_order(request, order_id):
-    driver_id = request.user.get("driver_id")
-    return Response(*update_order_status_by_driver(
-        driver_id,
-        order_id,
-        new_status="delivered",
-        allowed_previous_statuses=["picked_up"],
-        notification_message="Your order {order_id} has been delivered by the driver."
-    ))
-
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def driver_cancel_order(request, order_id):
-    driver_id = request.user.get("driver_id")
-    return Response(*update_order_status_by_driver(
-        driver_id,
-        order_id,
-        new_status="canceled",
-        allowed_previous_statuses=["pending", "assigned", "confirmed", "picked_up"],
-        notification_message="Your order {order_id} has been canceled by the driver."
-    ))
-
-
-
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def update_driver_location(request):
-    try:
-        driver_id = request.user.get("driver_id")
-        if not driver_id:
-            return Response({"error": "Driver ID not found in token"}, status=403)
-
-        latitude = request.data.get("latitude")
-        longitude = request.data.get("longitude")
-
-        if latitude is None or longitude is None:
-            return Response({"error": "Both latitude and longitude are required"}, status=400)
-
-        try:
-            latitude = float(latitude)
-            longitude = float(longitude)
-        except ValueError:
-            return Response({"error": "Latitude and longitude must be numbers"}, status=400)
-
-        # Update location in the driver document
-        now = datetime.now(LOCAL_TZ)
+        price_per_kg_raw = request.data.get("price_per_kg", 0)
+        print("Raw price_per_kg from request:", price_per_kg_raw)
+
+        price_per_kg = float(price_per_kg_raw)
+        if price_per_kg <= 0:
+            print("Invalid price_per_kg:", price_per_kg)
+            return Response({"error": "Invalid price"}, status=400)
+
+        print(f"Updating driver {driver['_id']} price_per_kg to {price_per_kg}...")
         drivers_collection.update_one(
-            {"_id": ObjectId(driver_id)},
-            {"$set": {
-                "current_location": {"latitude": latitude, "longitude": longitude},
-                "location_updated_at": now.isoformat()
-            }}
+            {"_id": driver["_id"]},
+            {"$set": {"price_per_kg": price_per_kg, "updated_at": datetime.now()}}
         )
 
-        return Response({
-            "message": "Location updated successfully",
-            "location": {"latitude": latitude, "longitude": longitude},
-            "updated_at": now.isoformat()
-        }, status=200)
-
-    except Exception as e:
-        return Response({"error": "Failed to update location", "details": str(e)}, status=500)
-
-
-
-
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def driver_accept_reject_order(request, order_id):
-    try:
-        driver_id = request.user.get("driver_id")
-        if not driver_id:
-            return Response({"error": "Driver ID not found in token"}, status=403)
-
-        action = request.data.get("action")
-        if action not in ["accept", "reject"]:
-            return Response({"error": "Invalid action. Must be 'accept' or 'reject'."}, status=400)
-
-        # Convert order_id
-        try:
-            oid = ObjectId(order_id)
-        except:
-            return Response({"error": "Invalid order ID format"}, status=400)
-
-        # Fetch order
-        order = gas_orders.find_one({"_id": oid})
-        if not order:
-            return Response({"error": "Order not found"}, status=404)
-
-        # Check if this driver is assigned
-        if order.get("driver_id") != driver_id:
-            return Response({"error": "You are not assigned to this order"}, status=403)
-
-        # Only allow action if order is assigned
-        if order.get("status") != "assigned":
-            return Response({"error": f"Cannot accept/reject order in status '{order.get('status')}'"}, status=400)
-
-        now = datetime.now(LOCAL_TZ)
-
-        if action == "accept":
-            new_status = "confirmed"
-            message = f"Your order {order_id} has been accepted by the driver."
-        else:
-            new_status = "unassigned"  # driver rejected, back to pool
-            message = f"Your order {order_id} was rejected by the driver. Reassigning..."
-            # Optionally, remove driver assignment
-            gas_orders.update_one({"_id": oid}, {"$unset": {"driver_id": ""}})
-
-        # Update order status
-        gas_orders.update_one(
-            {"_id": oid},
-            {"$set": {"status": new_status, "updated_at": now.isoformat()}}
+        print("Price update successful")
+        return Response(
+            {"message": "Price per kg updated successfully", "price_per_kg": price_per_kg},
+            status=200
         )
 
-        # Notify customer
-        send_notification(
-            user_id=order["customer_id"],
-            type_="order_status",
-            message=message,
-            order_id=order_id
-        )
-
-        return Response({
-            "message": f"Order {action}ed successfully",
-            "order_id": order_id,
-            "new_status": new_status
-        }, status=200)
-
     except Exception as e:
-        return Response({"error": "Failed to process action", "details": str(e)}, status=500)
-
-
-
-
-
-
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def update_driver_availability(request):
-    try:
-        driver_id = request.user.get("driver_id")
-        if not driver_id:
-            return Response({"error": "Driver ID not found in token"}, status=403)
-
-        status = request.data.get("status")
-        if status not in ["available", "unavailable"]:
-            return Response({"error": "Invalid status. Must be 'available' or 'unavailable'."}, status=400)
-
-        now = datetime.now(LOCAL_TZ)
-
-        # Update driver document
-        drivers_collection.update_one(
-            {"_id": ObjectId(driver_id)},
-            {"$set": {
-                "availability_status": status,
-                "availability_updated_at": now.isoformat()
-            }}
-        )
-
-        return Response({
-            "message": f"Availability updated to '{status}'",
-            "status": status,
-            "updated_at": now.isoformat()
-        }, status=200)
-
-    except Exception as e:
-        return Response({"error": "Failed to update availability", "details": str(e)}, status=500)
-
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def driver_dashboard(request):
-    try:
-        driver_id = request.user.get("driver_id")
-        if not driver_id:
-            return Response({"error": "Driver ID not found in token"}, status=403)
-
-        driver = drivers_collection.find_one({"_id": ObjectId(driver_id)}, {"password": 0})
-        if not driver:
-            return Response({"error": "Driver not found"}, status=404)
-
-        # Current location and availability
-        location = driver.get("current_location", {})
-        availability = driver.get("availability_status", "unavailable")
-
-        # Assigned orders (status: pending, confirmed, picked_up)
-        assigned_orders = list(gas_orders.find({
-            "driver_id": driver_id,
-            "status": {"$in": ["assigned", "confirmed", "picked_up"]}
-        }))
-
-        # Format orders
-        orders_list = []
-        for order in assigned_orders:
-            orders_list.append({
-                "order_id": str(order["_id"]),
-                "status": order.get("status"),
-                "customer_id": order.get("customer_id"),
-                "address": order.get("delivery_address"),
-                "payment_status": order.get("payment_status"),
-                "created_at": order.get("created_at"),
-                "updated_at": order.get("updated_at")
-            })
-
-        # Optional: last 5 completed/canceled orders
-        history_orders = list(gas_orders.find({
-            "driver_id": driver_id,
-            "status": {"$in": ["delivered", "canceled"]}
-        }).sort("updated_at", -1).limit(5))
-
-        history_list = []
-        for order in history_orders:
-            history_list.append({
-                "order_id": str(order["_id"]),
-                "status": order.get("status"),
-                "customer_id": order.get("customer_id"),
-                "address": order.get("delivery_address"),
-                "payment_status": order.get("payment_status"),
-                "updated_at": order.get("updated_at")
-            })
-
-        return Response({
-            "driver": {
-                "driver_id": driver_id,
-                "username": driver.get("username"),
-                "company_id": driver.get("company_id"),
-                "availability": availability,
-                "location": location,
-            },
-            "assigned_orders": orders_list,
-            "recent_history": history_list
-        }, status=200)
-
-    except Exception as e:
-        return Response({"error": "Failed to fetch dashboard", "details": str(e)}, status=500)
+        print("Exception occurred while setting price_per_kg:", str(e))
+        return Response({"error": "Failed to set price", "details": str(e)}, status=500)

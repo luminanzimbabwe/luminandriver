@@ -9,7 +9,7 @@ class UserSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=6)
     confirm_password = serializers.CharField(write_only=True)
     phone_number = serializers.CharField(max_length=15)
-    address = serializers.CharField(max_length=255)
+   
 
     def validate_username(self, value):
         if len(value) < 3:
@@ -57,3 +57,13 @@ class UserSerializer(serializers.Serializer):
 class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField(required=True)  # username or phone_number
     password = serializers.CharField(required=True, write_only=True)
+
+
+
+class NotificationSerializer(serializers.Serializer):
+    notification_id = serializers.CharField()
+    type = serializers.CharField()
+    message = serializers.CharField()
+    order_id = serializers.CharField(allow_null=True, required=False)
+    read = serializers.BooleanField()
+    created_at = serializers.DateTimeField()

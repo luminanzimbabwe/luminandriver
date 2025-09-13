@@ -11,6 +11,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 from decouple import config
 from pathlib import Path
+from datetime import timedelta
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,9 +22,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 ALLOWED_HOSTS = config("DJANGO_ALLOWED_HOSTS").split(",")
 
 # CORS
-CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS").split(",")
+CORS_ALLOW_ALL_ORIGINS = True
 
 
+
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 
 
@@ -45,6 +49,31 @@ SECRET_KEY = config("SECRET_KEY")
 
 # Debug mode
 DEBUG = config("DEBUG", default=False, cast=bool)
+
+
+# Allow specific HTTP methods
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+
+# Allow common headers
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+
 
 
 # Application definition
@@ -73,6 +102,16 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
 ]
+
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [],  # no token / jwt / session
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',  # everyone allowed
+    ],
+}
+
+
 
 
 ROOT_URLCONF = 'luminan_project.urls'

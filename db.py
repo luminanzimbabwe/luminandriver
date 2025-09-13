@@ -9,3 +9,4 @@ client = MongoClient(MONGO_URI)
 db = client[MONGO_DB]
 
 users_collection = db["users"]
+drivers_collection = db["drivers"]
