@@ -49,7 +49,7 @@ const HomeScreen = () => {
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:8000/driver/orders/", {
+      const res = await fetch("https://backend-luminan.onrender.com/driver/orders/", {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -93,7 +93,7 @@ const HomeScreen = () => {
     if (!selectedOrder?.order_id) return Alert.alert("Action unavailable");
 
     try {
-      const API_URL = `http://localhost:8000/driver/orders/${selectedOrder.order_id}/${action}/`;
+      const API_URL = `https://backend-luminan.onrender.com/driver/orders/${selectedOrder.order_id}/${action}/`;
       const res = await fetch(API_URL, {
         method: "PATCH",
         headers: {
@@ -247,8 +247,6 @@ const HomeScreen = () => {
 
 export default HomeScreen;
 
-
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
   statusScrollContainer: { marginBottom: 10 },
@@ -272,7 +270,7 @@ const styles = StyleSheet.create({
   statusLabel: { color: "#fff", fontSize: 16, fontWeight: "bold", marginBottom: 2 },
   statusCount: { color: "#00eaff", fontSize: 18, fontWeight: "bold" },
   ordersContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 10 },
-  ordersTitle: { color: "#fff", fontSize: 22, fontWeight: "bold", marginBottom: 10 },
+  ordersTitle: { color: "#fff", fontSize: 24, fontWeight: "bold", marginBottom: 10 },
   orderItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -287,8 +285,8 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
   },
   orderInfo: { flex: 1 },
-  orderCustomer: { color: "#fff", fontSize: 16, fontWeight: "bold", marginBottom: 2 },
-  orderLocation: { color: "#e5e7eb", fontSize: 15, marginBottom: 2 },
+  orderCustomer: { color: "#fff", fontSize: 18, fontWeight: "bold", marginBottom: 2 },
+  orderLocation: { color: "#e5e7eb", fontSize: 16, marginBottom: 2 },
   emptyText: { color: "#888", fontSize: 16, textAlign: "center", marginTop: 40 },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
   modalContent: {
@@ -302,10 +300,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
   },
-  modalTitle: { color: "#00eaff", fontSize: 22, fontWeight: "bold", marginBottom: 10, textAlign: "center" },
+  modalTitle: { color: "#00eaff", fontSize: 24, fontWeight: "bold", marginBottom: 10, textAlign: "center" },
   modalActions: { flexDirection: "row", justifyContent: "space-around", marginTop: 18, marginBottom: 10 },
   actionButton: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 12, marginHorizontal: 5 },
   actionText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
   detailLabel: { color: "#ccc", fontWeight: "bold", marginTop: 10, fontSize: 14 },
-  detailValue: { color: "#fff", fontSize: 15, marginBottom: 4 },
+  detailValue: { color: "#fff", fontSize: 16, marginBottom: 4 },
 });

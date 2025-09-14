@@ -36,7 +36,7 @@ useEffect(() => {
         return;
       }
 
-      const response = await fetch("http://localhost:8000/api/profile/", {
+      const response = await fetch("https://backend-luminan.onrender.com/api/profile/", {
         headers: { Authorization: `Bearer ${token}` },
       });
 

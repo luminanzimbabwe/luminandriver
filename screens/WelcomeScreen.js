@@ -493,7 +493,7 @@ const WelcomeScreen = ({ navigation }) => {
             },
           ]}
         >
-          <Text style={styles.title}>Welcome to LuminaN</Text>
+          <Text style={styles.title}>Welcome LuminaNDriver</Text>
           <Text style={styles.subtitle}>
             Your trusted gas delivery partner in Zimbabwe
           </Text>

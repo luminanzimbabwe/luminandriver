@@ -5,7 +5,7 @@ const DriverAuthContext = createContext();
 export const DriverAuthProvider = ({ children }) => {
   const [authToken, setAuthToken] = useState(null);
   const [loading, setLoading] = useState(true); // show loading initially
-  const BACKEND_URL = "http://localhost:8000";
+  const BACKEND_URL = "https://backend-luminan.onrender.com";
 
   /** Sign in: stores auth token */
   const signIn = (token) => {

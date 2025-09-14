@@ -11,8 +11,8 @@ import {
 } from "react-native";
 import { useDriverAuth } from "../DriverAuthContext"; // context for auth token
 
-const BACKEND_URL = "http://localhost:8000/drivers/set-price/";
-const DRIVER_PROFILE_URL = "http://localhost:8000/drivers/me/";
+const BACKEND_URL = "https://backend-luminan.onrender.com/drivers/set-price/";
+const DRIVER_PROFILE_URL = "https://backend-luminan.onrender.com/drivers/me/";
 
 const DriverSetPrice = () => {
   const { authToken } = useDriverAuth(); // get token from context

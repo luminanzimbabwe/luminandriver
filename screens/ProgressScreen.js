@@ -22,7 +22,7 @@ import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { getCurrentUserToken } from "../services/auth";
 
 const { width, height } = Dimensions.get("window");
-const BACKEND_URL = "http://localhost:8000";
+const BACKEND_URL = "https://backend-luminan.onrender.com";
 
 const statusConfig = {
   pending: {

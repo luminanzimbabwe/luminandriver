@@ -19,6 +19,8 @@ const RegisterScreen = ({ navigation }) => {
   const [formData, setFormData] = useState({
     username: "",
     email: "",
+    phone: "",
+    operational_area: "",
     password: "",
     confirm_password: "",
   });
@@ -40,8 +42,17 @@ const RegisterScreen = ({ navigation }) => {
   }, []);
 
   const handleChange = (name, value) => {
+    if (name === "phone") value = formatPhone(value);
     setFormData({ ...formData, [name]: value });
     setErrors({ ...errors, [name]: "" });
+  };
+
+  const formatPhone = (phone) => {
+    let digits = phone.replace(/\D/g, "");
+    // Normalize Zimbabwe numbers
+    if (digits.startsWith("263")) digits = "0" + digits.slice(3);
+    else if (!digits.startsWith("0") && digits.length > 0) digits = "0" + digits;
+    return digits; // Do not slice; keep full number
   };
 
   const validate = () => {
@@ -50,6 +61,11 @@ const RegisterScreen = ({ navigation }) => {
     if (!formData.email.trim()) tempErrors.email = "Email is required";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim()))
       tempErrors.email = "Email is invalid";
+    if (!formData.phone.trim()) tempErrors.phone = "Phone number is required";
+    else if (!/^0\d{9}$/.test(formData.phone))
+      tempErrors.phone = "Phone must be 10 digits starting with 0";
+    if (!formData.operational_area.trim())
+      tempErrors.operational_area = "Operational area is required";
     if (!formData.password) tempErrors.password = "Password is required";
     if (!formData.confirm_password)
       tempErrors.confirm_password = "Please confirm your password";
@@ -68,7 +84,9 @@ const RegisterScreen = ({ navigation }) => {
     try {
       const payload = { ...formData };
 
-      const response = await fetch("http://localhost:8000/api/register/", {
+      console.log("Register payload:", payload); // Log payload for debugging
+
+      const response = await fetch("https://backend-luminan.onrender.com/driver/register/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -85,6 +103,7 @@ const RegisterScreen = ({ navigation }) => {
         await signIn(data.driver.auth_token, data.driver);
         navigation.replace("MainApp");
       } else {
+        // Map backend error message
         setErrors(data.errors || { general: data.error || "Registration failed" });
       }
     } catch (err) {
@@ -103,7 +122,7 @@ const RegisterScreen = ({ navigation }) => {
             Join LuminaN, Zimbabwe's most reliable gas delivery service. Fill in your details to get started.
           </Text>
 
-          {/* Username */}
+          {/** Username **/}
           <TextInput
             style={styles.input}
             placeholder="Username"
@@ -113,7 +132,7 @@ const RegisterScreen = ({ navigation }) => {
           />
           {errors.username && <Text style={styles.errorText}>{errors.username}</Text>}
 
-          {/* Email */}
+          {/** Email **/}
           <TextInput
             style={styles.input}
             placeholder="Email"
@@ -125,7 +144,28 @@ const RegisterScreen = ({ navigation }) => {
           />
           {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
 
-          {/* Password */}
+          {/** Phone **/}
+          <TextInput
+            style={styles.input}
+            placeholder="+263 78 xxx xxxx"
+            placeholderTextColor="#bbb"
+            keyboardType="phone-pad"
+            value={formData.phone}
+            onChangeText={(v) => handleChange("phone", v)}
+          />
+          {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
+
+          {/** Operational Area **/}
+          <TextInput
+            style={styles.input}
+            placeholder="Operational Area"
+            placeholderTextColor="#bbb"
+            value={formData.operational_area}
+            onChangeText={(v) => handleChange("operational_area", v)}
+          />
+          {errors.operational_area && <Text style={styles.errorText}>{errors.operational_area}</Text>}
+
+          {/** Password **/}
           <View style={styles.passwordContainer}>
             <TextInput
               style={styles.input}
@@ -141,7 +181,7 @@ const RegisterScreen = ({ navigation }) => {
           </View>
           {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
 
-          {/* Confirm Password */}
+          {/** Confirm Password **/}
           <TextInput
             style={styles.input}
             placeholder="Confirm Password"

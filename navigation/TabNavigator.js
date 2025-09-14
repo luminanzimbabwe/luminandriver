@@ -5,7 +5,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 
 import HomeScreen from "../screens/HomeScreen";
-import ProfileScreen from "../screens/ProfileScreen";
+
 import UpdatesScreen from "../screens/UpdatesScreen";
 import ProgressScreen from "../screens/ProgressScreen";
 
@@ -24,7 +24,6 @@ const TabNavigator = () => {
         tabBarIcon: ({ focused, color, size }) => {
           let iconName;
           if (route.name === "Home") iconName = focused ? "home" : "home-outline";
-          else if (route.name === "Profile") iconName = focused ? "person" : "person-outline";
           else if (route.name === "Updates") iconName = focused ? "notifications" : "notifications-outline";
           else if (route.name === "Progress") iconName = focused ? "pulse" : "pulse-outline";
 
@@ -33,7 +32,6 @@ const TabNavigator = () => {
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
       <Tab.Screen name="Updates" component={UpdatesScreen} />
       <Tab.Screen name="Progress" component={ProgressScreen} />
     </Tab.Navigator>
