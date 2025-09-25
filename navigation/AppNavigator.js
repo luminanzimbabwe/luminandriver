@@ -9,8 +9,6 @@ import WelcomeScreen from "../screens/WelcomeScreen";
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 
-
-
 // Main App
 import TabNavigator from "./TabNavigator";
 
@@ -20,10 +18,9 @@ const AppNavigator = () => {
   const { isLoggedIn, loading } = useDriverAuth();
 
   if (loading) {
+    // Splash Screen or loading indicator can be here while checking auth state
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator size="large" color="#00eaff" />
-      </View>
+      <SplashScreen /> // Use SplashScreen to handle animation and loading
     );
   }
 
@@ -36,13 +33,11 @@ const AppNavigator = () => {
           <Stack.Screen name="Welcome" component={WelcomeScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="Register" component={RegisterScreen} />
-        
         </>
       ) : (
-        // Main app
+        // Main app flow
         <>
           <Stack.Screen name="MainApp" component={TabNavigator} />
-          
         </>
       )}
     </Stack.Navigator>

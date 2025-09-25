@@ -1,4 +1,3 @@
-// screens/SplashScreen.js
 import React, { useEffect, useRef } from "react";
 import {
   View,
@@ -46,7 +45,7 @@ const SplashScreen = ({ navigation }) => {
       }),
     ]).start();
 
-    // Navigate once auth has loaded, ensure splash shows at least 2.5s
+    // Ensure splash screen stays visible for at least 2.5 seconds
     const timer = setTimeout(() => {
       if (!loading) {
         if (driver) navigation.replace("MainApp");
@@ -56,6 +55,15 @@ const SplashScreen = ({ navigation }) => {
 
     return () => clearTimeout(timer);
   }, [loading, driver]);
+
+  // Handle loading state more smoothly
+  useEffect(() => {
+    if (!loading && driver) {
+      navigation.replace("MainApp");
+    } else if (!loading && !driver) {
+      navigation.replace("Welcome");
+    }
+  }, [loading, driver, navigation]);
 
   return (
     <View style={styles.container}>

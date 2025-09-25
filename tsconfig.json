@@ -1,7 +1,8 @@
 {
-  "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "moduleResolution": "bundler",
+    "moduleResolution": "Node16",
+    "module": "Node16",
     "strict": true
-  }
+  },
+  "extends": "expo/tsconfig.base"
 }

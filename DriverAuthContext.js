@@ -1,4 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const DriverAuthContext = createContext();
 
@@ -11,13 +12,13 @@ export const DriverAuthProvider = ({ children }) => {
   const signIn = (token) => {
     if (!token) return;
     setAuthToken(token);
-    localStorage.setItem("driverAuthToken", token);
+    AsyncStorage.setItem("driverAuthToken", token); // Use AsyncStorage in React Native
   };
 
   /** Sign out */
   const signOut = () => {
     setAuthToken(null);
-    localStorage.removeItem("driverAuthToken");
+    AsyncStorage.removeItem("driverAuthToken");
   };
 
   /** Validate token with backend: returns true if valid, false if invalid */
@@ -32,31 +33,32 @@ export const DriverAuthProvider = ({ children }) => {
       });
       return res.ok;
     } catch (err) {
+      console.error("Token validation failed:", err);
       return false;
     }
   };
 
-  /** Initialize auth: always force login */
+  /** Initialize auth: checks if token is valid on app start */
   const initAuth = async () => {
     setLoading(true);
-    const token = localStorage.getItem("driverAuthToken");
+    const token = await AsyncStorage.getItem("driverAuthToken");
 
     if (token) {
       const valid = await validateToken(token);
       if (valid) {
-        // optional: still force login if you want
-        // signIn(token);
-        signOut(); // remove token so driver always sees login
+        signIn(token); // If valid, sign in with the token
       } else {
-        signOut(); // invalid token, remove
+        signOut(); // If invalid, sign out and clear token
       }
+    } else {
+      signOut(); // No token found, sign out
     }
 
     setLoading(false);
   };
 
   useEffect(() => {
-    initAuth();
+    initAuth(); // Run auth initialization on mount
   }, []);
 
   /** Fetch wrapper for driver API calls using token auth */
@@ -64,23 +66,28 @@ export const DriverAuthProvider = ({ children }) => {
     if (!authToken) throw new Error("Driver not signed in");
 
     const method = options.method || "GET";
-    const res = await fetch(`${BACKEND_URL}${endpoint}`, {
-      ...options,
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${authToken}`,
-        ...options.headers,
-      },
-      body: method !== "GET" && options.body ? JSON.stringify(options.body) : null,
-    });
+    try {
+      const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+        ...options,
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${authToken}`,
+          ...options.headers,
+        },
+        body: method !== "GET" && options.body ? JSON.stringify(options.body) : null,
+      });
 
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || "Request failed");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Request failed");
+      }
+
+      return res.json();
+    } catch (error) {
+      console.error("Fetch request failed:", error);
+      throw error;
     }
-
-    return res.json();
   };
 
   const isLoggedIn = !!authToken;
