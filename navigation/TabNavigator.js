@@ -7,7 +7,6 @@ import { Ionicons } from "@expo/vector-icons";
 import HomeScreen from "../screens/HomeScreen";
 
 import UpdatesScreen from "../screens/UpdatesScreen";
-import ProgressScreen from "../screens/ProgressScreen";
 
 const Tab = createBottomTabNavigator();
 
@@ -25,15 +24,12 @@ const TabNavigator = () => {
           let iconName;
           if (route.name === "Home") iconName = focused ? "home" : "home-outline";
           else if (route.name === "Updates") iconName = focused ? "notifications" : "notifications-outline";
-          else if (route.name === "Progress") iconName = focused ? "pulse" : "pulse-outline";
-
           return <Ionicons name={iconName} size={24} color={color} />;
         },
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Updates" component={UpdatesScreen} />
-      <Tab.Screen name="Progress" component={ProgressScreen} />
     </Tab.Navigator>
   );
 };

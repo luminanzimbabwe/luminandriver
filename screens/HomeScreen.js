@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -39,6 +39,7 @@ const HomeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchOrders();
@@ -47,6 +48,7 @@ const HomeScreen = () => {
   const fetchOrders = async () => {
     if (!authToken) return setLoading(false);
     setLoading(true);
+    setError(null); // Reset error state
 
     try {
       const res = await fetch("https://backend-luminan.onrender.com/driver/orders/", {
@@ -70,7 +72,7 @@ const HomeScreen = () => {
       }, {});
       setGroupedOrders(grouped);
     } catch (err) {
-      Alert.alert("Error", err.message || "Failed to fetch orders.");
+      setError(err.message || "Failed to fetch orders.");
       setOrders([]);
       setGroupedOrders({ pending: [], confirmed: [], delivered: [], cancelled: [] });
     } finally {
@@ -79,10 +81,10 @@ const HomeScreen = () => {
     }
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setRefreshing(true);
     fetchOrders();
-  };
+  }, []);
 
   const handleOrderPress = (order) => {
     setSelectedOrder(order);
@@ -105,6 +107,7 @@ const HomeScreen = () => {
 
       if (!res.ok) throw new Error("Action failed");
       fetchOrders();
+      Alert.alert("Success", `Order ${action} successfully.`);
     } catch (err) {
       Alert.alert("Error", err.message);
     } finally {
@@ -153,6 +156,8 @@ const HomeScreen = () => {
         </Text>
         {loading ? (
           <ActivityIndicator size="large" color="#00eaff" style={{ marginTop: 40 }} />
+        ) : error ? (
+          <Text style={styles.errorText}>{error}</Text>
         ) : (
           <FlatList
             data={groupedOrders[selectedStatus] || []}
@@ -288,6 +293,7 @@ const styles = StyleSheet.create({
   orderCustomer: { color: "#fff", fontSize: 18, fontWeight: "bold", marginBottom: 2 },
   orderLocation: { color: "#e5e7eb", fontSize: 16, marginBottom: 2 },
   emptyText: { color: "#888", fontSize: 16, textAlign: "center", marginTop: 40 },
+  errorText: { color: "#ff6b6b", fontSize: 16, textAlign: "center", marginTop: 40 },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
   modalContent: {
     backgroundColor: "#1a2332",
