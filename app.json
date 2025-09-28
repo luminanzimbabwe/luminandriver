@@ -33,9 +33,10 @@
       ],
       "react-native-edge-to-edge"
     ],
+    "owner": "privateluminan",
     "extra": {
       "eas": {
-        "projectId": "4802c0e3-9f93-4d16-8505-f13322633039"
+        "projectId": "633fbf8a-a7a7-4215-9a9f-7d8e65b35b8e"
       }
     }
   }
