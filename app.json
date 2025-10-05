@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "LuminaNDriver",
-    "slug": "LuminaNDriver",
+    "slug": "luminandriver",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
@@ -36,7 +36,7 @@
     "owner": "privateluminan",
     "extra": {
       "eas": {
-        "projectId": "633fbf8a-a7a7-4215-9a9f-7d8e65b35b8e"
+        "projectId": "9cbdfef3-79ff-4081-9a1a-4fe43322fe9c"
       }
     }
   }
