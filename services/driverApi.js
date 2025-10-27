@@ -10,7 +10,7 @@
 
 // Environment configuration
 // Environment configuration
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://backend-luminan.onrender.com";
 const API_VERSION = "/api/v1";
 const DRIVER_BASE = `${API_VERSION}/driver`;
 

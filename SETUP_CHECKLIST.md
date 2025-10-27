@@ -8,9 +8,9 @@ Use this checklist to ensure everything is properly configured and tested.
 
 ### 1. Backend URL Configuration
 - [ ] Open `services/driverApi.js`
-- [ ] Update `BACKEND_URL` constant with your actual backend URL
+- [ ] Verify `BACKEND_URL` constant is set to production URL
   ```javascript
-  const BACKEND_URL = "https://your-backend-url.com"; // Change this
+  const BACKEND_URL = "https://backend-luminan.onrender.com"; // Production URL
   ```
 - [ ] Verify URL has no trailing slash
 - [ ] Test backend is accessible from your network

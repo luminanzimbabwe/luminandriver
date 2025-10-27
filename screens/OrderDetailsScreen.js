@@ -18,7 +18,7 @@ import { useDriverAuth } from "../DriverAuthContext";
 // If running on Android emulator, CHANGE 'localhost' to '10.0.2.2'.
 // If running on a physical device, CHANGE 'localhost' to your local IP.
 // =========================================================================
-const BASE_URL = "http://localhost:8000/api/v1/driver/orders/"; 
+const BASE_URL = "https://backend-luminan.onrender.com/api/v1/driver/orders/";
 
 const OrderDetailsScreen = ({ route, navigation }) => {
   const { driver } = useDriverAuth(); // 👈 Call the hook here!

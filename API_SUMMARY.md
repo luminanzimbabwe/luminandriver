@@ -167,7 +167,7 @@ luminandriver/
 
 In `services/driverApi.js`, change:
 ```javascript
-const BACKEND_URL = "http://localhost:8000";
+const BACKEND_URL = "https://backend-luminan.onrender.com";
 ```
 
 To your production URL:
@@ -177,7 +177,7 @@ const BACKEND_URL = "https://api.luminan.co.zw";
 
 Or use environment variables:
 ```javascript
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://backend-luminan.onrender.com";
 ```
 
 ---
