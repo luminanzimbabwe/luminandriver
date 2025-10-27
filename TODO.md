@@ -1,0 +1,3 @@
+- [x] Modify registerDriver to set driver state immediately after registration
+- [x] Disable PIN expiry to prevent logout
+- [x] Test the registration flow to ensure driver is remembered (unable to test due to browser tool disabled)

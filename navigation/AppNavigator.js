@@ -5,41 +5,43 @@ import { useDriverAuth } from "../DriverAuthContext";
 
 // Screens
 import SplashScreen from "../screens/SplashScreen";
-import WelcomeScreen from "../screens/WelcomeScreen";
-import LoginScreen from "../screens/LoginScreen";
+import AuthLoadingScreen from "../screens/AuthLoadingScreen";
 import RegisterScreen from "../screens/RegisterScreen";
+import OtpVerificationScreen from "../screens/OtpVerificationScreen";
+import PinLoginScreen from "../screens/PinLoginScreen";
+import SetPinScreen from "../screens/SetPinScreen";
 
-// Main App
+
 import TabNavigator from "./TabNavigator";
 
 const Stack = createNativeStackNavigator();
 
 const AppNavigator = () => {
-  const { isLoggedIn, loading } = useDriverAuth();
+  const { isLoggedIn, driver, loading, pinRequired } = useDriverAuth();
 
   if (loading) {
-    // Splash Screen or loading indicator can be here while checking auth state
+   
     return (
-      <SplashScreen /> // Use SplashScreen to handle animation and loading
+      <SplashScreen /> 
     );
   }
 
+ 
+  let initialRouteName = "PinLogin";
+
+  if (isLoggedIn && !pinRequired) {
+    initialRouteName = "MainApp";
+  }
+
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {!isLoggedIn ? (
-        // Auth flow
-        <>
-          <Stack.Screen name="Splash" component={SplashScreen} />
-          <Stack.Screen name="Welcome" component={WelcomeScreen} />
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Register" component={RegisterScreen} />
-        </>
-      ) : (
-        // Main app flow
-        <>
-          <Stack.Screen name="MainApp" component={TabNavigator} />
-        </>
-      )}
+    <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRouteName}>
+      <Stack.Screen name="Splash" component={SplashScreen} />
+      <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} />
+      <Stack.Screen name="Register" component={RegisterScreen} />
+      <Stack.Screen name="OtpVerification" component={OtpVerificationScreen} />
+      <Stack.Screen name="PinLogin" component={PinLoginScreen} />
+      <Stack.Screen name="SetPin" component={SetPinScreen} />
+      <Stack.Screen name="MainApp" component={TabNavigator} />
     </Stack.Navigator>
   );
 };

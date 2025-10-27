@@ -13,13 +13,13 @@ import {
   Vibration,
   Pressable,
 } from "react-native";
-import Svg, { 
-  Rect, 
-  Text as SvgText, 
-  Circle, 
-  Path, 
-  Defs, 
-  LinearGradient as SvgLinearGradient, 
+import Svg, {
+  Rect,
+  Text as SvgText,
+  Circle,
+  Path,
+  Defs,
+  LinearGradient as SvgLinearGradient,
   Stop,
   RadialGradient,
   ClipPath
@@ -28,6 +28,7 @@ import { Ionicons, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
+import { useDriverAuth } from "../DriverAuthContext";
 
 const { width, height } = Dimensions.get("window");
 
@@ -38,7 +39,7 @@ const WelcomeScreen = ({ navigation }) => {
 
   // Enhanced Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(50)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
   const logoScale = useRef(new Animated.Value(0.7)).current;
   const logoRotate = useRef(new Animated.Value(0)).current;
   const particleAnimations = useRef([]).current;
@@ -79,68 +80,80 @@ const WelcomeScreen = ({ navigation }) => {
     },
   ];
 
-  useEffect(() => {
-    // Initialize particle animations
-    for (let i = 0; i < 8; i++) {
-      particleAnimations[i] = new Animated.Value(0);
-    }
+  const { driver, pinRequired, loading } = useDriverAuth();
 
-    // Enhanced entrance sequence
-    Animated.sequence([
-      // Background shift animation
-      Animated.timing(backgroundShift, {
-        toValue: 1,
-        duration: 2000,
-        useNativeDriver: true,
-      }),
-      
-      Animated.parallel([
-        // Logo entrance with rotation
+  useEffect(() => {
+    if (loading) return; // Wait for authentication loading to complete
+
+    // Check auth state and navigate accordingly
+    if (driver) {
+      navigation.navigate("MainApp");
+    } else if (pinRequired) {
+      navigation.navigate("PinLogin");
+    } else {
+      // Stay on Welcome screen and start animations
+      // Initialize particle animations
+      for (let i = 0; i < 8; i++) {
+        particleAnimations[i] = new Animated.Value(0);
+      }
+
+      // Enhanced entrance sequence
+      Animated.sequence([
+        // Background shift animation
+        Animated.timing(backgroundShift, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+
         Animated.parallel([
-          Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 1200,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.spring(logoScale, {
-            toValue: 1,
-            friction: 6,
-            tension: 100,
-            useNativeDriver: true,
-          }),
-          Animated.timing(logoRotate, {
-            toValue: 1,
-            duration: 1500,
-            easing: Easing.out(Easing.back(1.2)),
+          // Logo entrance with rotation
+          Animated.parallel([
+            Animated.timing(fadeAnim, {
+              toValue: 1,
+              duration: 1200,
+              easing: Easing.out(Easing.cubic),
+              useNativeDriver: true,
+            }),
+            Animated.spring(logoScale, {
+              toValue: 1,
+              friction: 6,
+              tension: 100,
+              useNativeDriver: true,
+            }),
+            Animated.timing(logoRotate, {
+              toValue: 1,
+              duration: 1500,
+              easing: Easing.out(Easing.back(1.2)),
+              useNativeDriver: true,
+            }),
+          ]),
+
+          // Content slide in
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 1000,
+            delay: 300,
+            easing: Easing.out(Easing.exp),
             useNativeDriver: true,
           }),
         ]),
-        
-        // Content slide in
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 1000,
-          delay: 300,
-          easing: Easing.out(Easing.exp),
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start();
+      ]).start();
 
-    // Start particle animations
-    startParticleAnimations();
-    
-    // Start button pulse
-    startButtonPulse();
-    
-    // Auto-rotate features
-    const featureInterval = setInterval(() => {
-      setCurrentFeature((prev) => (prev + 1) % features.length);
-    }, 3000);
+      // Start particle animations
+      startParticleAnimations();
 
-    return () => clearInterval(featureInterval);
-  }, []);
+      // Start button pulse
+      startButtonPulse();
+
+      // Auto-rotate features
+      const featureInterval = setInterval(() => {
+        setCurrentFeature((prev) => (prev + 1) % features.length);
+      }, 3000);
+
+      return () => clearInterval(featureInterval);
+    }
+  }, [driver, pinRequired, loading, navigation]);
 
   const startParticleAnimations = () => {
     particleAnimations.forEach((anim, index) => {
@@ -194,7 +207,7 @@ const WelcomeScreen = ({ navigation }) => {
         useNativeDriver: true,
       }),
     ]).start(() => {
-      navigation.navigate("Login");
+      navigation.navigate("Register");
     });
   };
 
@@ -202,7 +215,7 @@ const WelcomeScreen = ({ navigation }) => {
     if (Platform.OS === 'ios') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    navigation.navigate("Login");
+    navigation.navigate("Register");
   };
 
   const showFeatureTooltip = (feature) => {
@@ -493,9 +506,9 @@ const WelcomeScreen = ({ navigation }) => {
             },
           ]}
         >
-          <Text style={styles.title}>Welcome LuminaNDriver</Text>
+          <Text style={styles.title}>Welcome to GasLT</Text>
           <Text style={styles.subtitle}>
-            Your trusted gas delivery partner in Zimbabwe
+            Zimbabwe's premier gas delivery service for drivers
           </Text>
           
           <View style={styles.descriptionContainer}>
