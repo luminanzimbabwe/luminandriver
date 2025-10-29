@@ -12,6 +12,10 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useDriverAuth } from "../DriverAuthContext";
+import { useDriverApi } from "../hooks/useDriverApi";
+import driverApi from "../services/driverApi";
+import locationTracker from "../services/locationTracker";
+import { useFocusEffect } from "@react-navigation/native";
 
 // =========================================================================
 // !!! CRITICAL: REMINDER TO CHECK YOUR BASE_URL !!!
@@ -22,25 +26,40 @@ const BASE_URL = "https://backend-luminan.onrender.com/api/v1/driver/orders/";
 
 const OrderDetailsScreen = ({ route, navigation }) => {
   const { driver } = useDriverAuth(); // 👈 Call the hook here!
-  
+  const { getOrderDetails, confirmOrder } = useDriverApi();
+
   const { order: passedOrder } = route.params;
-  
+
   // Prioritize 'order_id' as seen in the Django response
   const orderId = passedOrder?.order_id || passedOrder?._id || passedOrder?.id;
 
   const [order, setOrder] = useState(passedOrder || null);
   const [actionLoading, setActionLoading] = useState(false);
-  
-  // Custom Confirmation Modal States
-  const [deliveredModalVisible, setDeliveredModalVisible] = useState(false); 
-  const [confirmModalVisible, setConfirmModalVisible] = useState(false); // 🌟 NEW STATE
 
-  // EXTRA LOG: Check component mount and initial order data
-  useEffect(() => {
-    console.log("--- OrderDetailsScreen Mounted ---");
-    console.log("Current Order ID calculated as:", orderId); 
-    console.log("Current Order Status:", order?.order_status);
-  }, [orderId, order?.order_status]);
+  // Custom Confirmation Modal States
+  const [deliveredModalVisible, setDeliveredModalVisible] = useState(false);
+  const [confirmModalVisible, setConfirmModalVisible] = useState(false); // 🌟 NEW STATE
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isTrackingLocation, setIsTrackingLocation] = useState(false);
+
+  // Fetch fresh order details on screen focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (orderId) {
+        console.log("Fetching fresh order details...");
+        getOrderDetails(orderId).then(result => {
+          if (result.success && result.data) {
+            console.log("Fresh order details fetched:", result.data);
+            setOrder(result.data);
+          } else {
+            console.warn("Failed to fetch fresh order details:", result.error);
+          }
+        }).catch(error => {
+          console.error("Error fetching order details:", error);
+        });
+      }
+    }, [orderId, getOrderDetails])
+  );
 
   if (!order) {
     // Basic null check fallback
@@ -62,26 +81,26 @@ const OrderDetailsScreen = ({ route, navigation }) => {
  * @param {string} successMessage - The message to show in the success alert
  * @param {object} payload - The body data to send, typically { driver_id: '...' }
  */
-const executeOrderAction = async (actionEndpoint, successStatus, successMessage, payload = {}) => {
+const executeOrderAction = async (actionEndpoint, successStatus, successMessage, payload = {}, method = "POST") => {
   setActionLoading(true);
-  
+
   const endpointUrl = `${BASE_URL}${orderId}/${actionEndpoint}/`;
-  console.log(`DEBUG: Target URL for ${successStatus}:`, endpointUrl); 
+  console.log(`DEBUG: Target URL for ${successStatus}:`, endpointUrl);
   // Optionally log the payload being sent for debugging
-  console.log(`DEBUG: Payload for ${actionEndpoint}:`, payload); 
+  console.log(`DEBUG: Payload for ${actionEndpoint}:`, payload);
 
   try {
     const response = await fetch(endpointUrl, {
-      method: "POST",
-      
+      method: method,
+
       // 👇 CRITICAL FIX: Add Content-Type header for JSON body
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         // 'Authorization': 'Bearer YOUR_TOKEN_HERE', // Add Authorization if needed
       },
-      
+
       // 👇 CRITICAL FIX: Send the payload as the request body
-      body: JSON.stringify(payload), 
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -103,13 +122,14 @@ const executeOrderAction = async (actionEndpoint, successStatus, successMessage,
     // Update local state and show final success alert
     setOrder((prev) => ({ ...prev, order_status: successStatus }));
     Alert.alert("Success", successMessage);
-    
-    // Optionally, navigate back to trigger a list refresh on the previous screen
-    // navigation.goBack();
 
+    return { success: true, data: result };
   } catch (error) {
     console.error("FETCH/NETWORK CATCH ERROR:", error);
-    Alert.alert("Error", error.message || `Failed to ${successStatus}. Check network connection and server IP.`);
+    const errorMsg = error.message || `Failed to ${successStatus}. Check network connection and server IP.`;
+    setErrorMessage(errorMsg);
+    Alert.alert("Error", errorMsg);
+    return { success: false, error: errorMsg };
   } finally {
     setActionLoading(false);
     console.log("DEBUG: Action finished. Loading state set to false.");
@@ -119,41 +139,78 @@ const executeOrderAction = async (actionEndpoint, successStatus, successMessage,
   // ---------------- Network Handler: Mark as Delivered ----------------
   const executeMarkAsDelivered = () => {
     setDeliveredModalVisible(false); // Close modal
-    executeOrderAction("delivered", "delivered", "Order marked as delivered!");
+    executeOrderAction("delivered", "delivered", "Order marked as delivered!").then(() => {
+      // Stop location tracking when order is delivered
+      stopLocationTracking();
+    });
   };
 
-  // ---------------- Network Handler: Confirm Order (Accept) ----------------
-  // ---------------- Network Handler: Confirm Order (Accept) ----------------
+// ---------------- Network Handler: Confirm Order (Accept) ----------------
 const executeConfirmOrder = () => {
   setConfirmModalVisible(false); // Close modal
-  
-  // 🚨 CRITICAL FIX: Ensure driver ID is available
-  if (!driver?._id) {
-    Alert.alert("Error", "Driver session expired. Please re-login.");
+  if (!driver) {
+    Alert.alert("Error", "Driver not logged in. Please login.");
     return;
   }
-  
-  // Assuming the backend endpoint for confirmation/acceptance is "confirm/"
-  // 🎯 FIX: Pass the required driver_id in the 4th argument (payload)
-  executeOrderAction(
-    "confirm", 
-    "confirmed", 
-    "Order successfully confirmed (accepted)!",
-    { driver_id: driver._id } // 👈 THIS IS THE FIX
-  ); 
+  // Require a driver id (any of the common fields)
+  const driverId = driver._id || driver.id || driver.temp_driver_id;
+  if (!driverId) {
+    Alert.alert("Error", "Driver ID missing. Please re-login.");
+    return;
+  }
+  executeOrderAction("confirm", "confirmed", "Order successfully confirmed (accepted)!", { driver_id: driverId }, "PATCH").then(() => {
+    // Start location tracking after confirming the order
+    startLocationTracking();
+  });
 };
 // ---------------- END Network Handlers ----------------
 
   // ---------------- Button Handler: Mark as Delivered (Triggers Modal) ----------------
   const handleMarkAsDelivered = () => {
-    if (!orderId) { return Alert.alert("Error", "Order ID missing"); }
+    if (!orderId) {
+      const msg = "Order ID missing";
+      setErrorMessage(msg);
+      return Alert.alert("Error", msg);
+    }
     setDeliveredModalVisible(true);
   };
   // ---------------- Button Handler: Confirm Order (Triggers Modal) ----------------
   const handleConfirmOrder = () => {
-    if (!orderId) { return Alert.alert("Error", "Order ID missing"); }
+    if (!orderId) {
+      const msg = "Order ID missing";
+      setErrorMessage(msg);
+      return Alert.alert("Error", msg);
+    }
     setConfirmModalVisible(true);
   };
+  // ---------------- Location Tracking Functions ----------------
+  const startLocationTracking = async () => {
+    try {
+      const driverId = driver._id || driver.id || driver.temp_driver_id;
+      await locationTracker.startTracking(orderId, driverId);
+      setIsTrackingLocation(true);
+      console.log('Location tracking started');
+    } catch (error) {
+      console.error('Failed to start location tracking:', error);
+      Alert.alert("Error", "Failed to start location tracking. Please check location permissions.");
+    }
+  };
+
+  const stopLocationTracking = () => {
+    locationTracker.stopTracking();
+    setIsTrackingLocation(false);
+    console.log('Location tracking stopped');
+  };
+
+  // Stop tracking when component unmounts or order is delivered
+  React.useEffect(() => {
+    return () => {
+      if (locationTracker.isCurrentlyTracking()) {
+        locationTracker.stopTracking();
+      }
+    };
+  }, []);
+
   // ---------------- END Button Handlers ----------------
 
   // ---------------- Status Logic ----------------
@@ -234,7 +291,20 @@ const executeConfirmOrder = () => {
 
         {/* Actions */}
         <View style={styles.actionsContainer}>
-          
+
+          {/* Location Tracking Status */}
+          {isTrackingLocation && (
+            <View style={styles.trackingStatus}>
+              <Ionicons name="location" size={16} color="#38bdf8" />
+              <Text style={styles.trackingText}>Location tracking active</Text>
+            </View>
+          )}
+
+          {/* Error Message Display */}
+          {errorMessage ? (
+            <Text style={styles.errorText}>{errorMessage}</Text>
+          ) : null}
+
           {/* 🌟 NEW BUTTON: Confirm Order (for Pending/Assigned) */}
           {isPendingActionAvailable && (
             <ActionButton
@@ -254,7 +324,7 @@ const executeConfirmOrder = () => {
               disabled={actionLoading}
             />
           )}
-          
+
           {/* No Actions Text */}
           {["cancelled", "delivered"].includes(order.order_status?.toLowerCase()) && (
             <Text style={styles.noActionsText}>No actions available for this order.</Text>
@@ -358,7 +428,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 50 },
   scrollContent: { flex: 1, paddingHorizontal: 20 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  errorText: { color: "#f87171", fontSize: 18, marginBottom: 20 },
+  errorText: { color: "#f87171", fontSize: 14, marginBottom: 10, textAlign: "center" },
   backButton: { backgroundColor: "#38bdf8", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
   backButtonText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
@@ -375,6 +445,8 @@ const styles = StyleSheet.create({
   actionButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 15, borderRadius: 12, marginBottom: 15 },
   actionButtonText: { color: "#0f172a", fontSize: 16, fontWeight: "bold" }, // Changed text color to dark for better contrast on colored buttons
   noActionsText: { color: "#888", fontSize: 14, textAlign: "center", marginTop: 10 },
+  trackingStatus: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(56,189,248,0.1)", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginBottom: 10 },
+  trackingText: { color: "#38bdf8", fontSize: 14, fontWeight: "600", marginLeft: 6 },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center" },
   overlayText: { color: "#fff", marginTop: 10, fontSize: 16 },
   

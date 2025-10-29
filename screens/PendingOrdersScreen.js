@@ -14,9 +14,17 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useDriverAuth } from "../DriverAuthContext";
 import { useDriverApi } from "../hooks/useDriverApi";
+import driverApi from "../services/driverApi";
 import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect } from "@react-navigation/native";
 
 const { width } = Dimensions.get("window");
+
+// =========================================================================
+// NOTE: Keep BASE_URL in sync with OrderDetailsScreen.cs - points to
+// /api/v1/driver/orders/{orderId}/{action}/
+// =========================================================================
+const BASE_URL = "https://backend-luminan.onrender.com/api/v1/driver/orders/";
 
 // Helper to safely parse amount (copied from previous logic for consistency)
 const safeParseAmount = (amount) => {
@@ -157,8 +165,8 @@ const OrderItem = ({ order, onPress, onConfirm }) => {
 const PendingOrdersScreen = () => {
   const navigation = useNavigation();
   const { driver, isLoggedIn } = useDriverAuth();
-  // Assume useDriverApi provides a function to confirm an order
-  const { getOrders, confirmOrder } = useDriverApi(); 
+  // Assume useDriverApi provides getOrders; we will POST directly for confirm
+  const { getOrders } = useDriverApi(); 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -188,10 +196,12 @@ const PendingOrdersScreen = () => {
     }
   }, [getOrders]); // Dependency: getOrders
 
-  useEffect(() => {
-    if (isLoggedIn) fetchOrders();
-    else setLoading(false);
-  }, [isLoggedIn, fetchOrders]); // Dependencies: isLoggedIn, fetchOrders
+  useFocusEffect(
+    React.useCallback(() => {
+      if (isLoggedIn) fetchOrders();
+      else setLoading(false);
+    }, [isLoggedIn, fetchOrders])
+  );
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -224,26 +234,62 @@ const PendingOrdersScreen = () => {
             { text: "Cancel", style: "cancel" },
             {
                 text: "Confirm",
-                onPress: async () => {
-                    setLoading(true);
-                    try {
-                        // Assuming confirmOrder is a function in useDriverApi
-                        const result = await confirmOrder(orderId); 
+        onPress: async () => {
+          setLoading(true);
+            try {
+            // Require a driver id (any of the common fields)
+            const driverId = (typeof driver === 'object') && (driver._id || driver.id || driver.temp_driver_id);
+            if (!driverId) {
+              Alert.alert("Error", "Driver ID missing. Please re-login.");
+              return;
+            }
 
-                        if (result.success) {
-                            Alert.alert("Success", `Order ${orderId} confirmed!`);
-                            // Re-fetch the list to show the order moved to the 'Confirmed' section
-                            await fetchOrders(); 
-                        } else {
-                            Alert.alert("Error", result.error || "Failed to confirm order.");
-                        }
-                    } catch (error) {
-                        console.error("Confirm order API failed:", error);
-                        Alert.alert("Error", "Network error. Failed to confirm order.");
-                    } finally {
-                        setLoading(false);
-                    }
-                }
+            // Validate driver exists on the backend first
+            const profileCheck = await driverApi.getDriverProfile(driverId);
+            if (!profileCheck.success) {
+              const msg = profileCheck.error || "Driver not found. Please re-login or verify your account.";
+              console.warn("DEBUG: Driver profile check failed:", profileCheck);
+              Alert.alert(
+                "Driver not found",
+                msg,
+                [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Register", onPress: () => navigation.navigate("Register") },
+                ],
+                { cancelable: true }
+              );
+              return;
+            }
+
+            // Proceed to confirm with the driver_id
+            const endpoint = `${BASE_URL}${orderId}/confirm/`;
+            console.log("DEBUG: Confirming order", orderId, "endpoint:", endpoint, "payload:", { driver_id: driverId });
+
+            const resp = await fetch(endpoint, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ driver_id: driverId }),
+            });
+
+            const text = await resp.text();
+            let data = {};
+            try { data = JSON.parse(text); } catch (e) { data = { message: text }; }
+
+            if (!resp.ok) {
+              const msg = data.error || data.message || `Failed with status ${resp.status}`;
+              Alert.alert("Error", msg);
+            } else {
+              const message = data.message || `Order ${orderId} confirmed!`;
+              Alert.alert("Success", message);
+              await fetchOrders();
+            }
+          } catch (error) {
+            console.error("Confirm order API failed:", error);
+            Alert.alert("Error", "Network error. Failed to confirm order.");
+          } finally {
+            setLoading(false);
+          }
+        }
             }
         ]
     );

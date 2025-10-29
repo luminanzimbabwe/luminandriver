@@ -3,7 +3,7 @@
     "name": "LuminaNDriver",
     "slug": "luminandriver",
     "version": "1.0.0",
-    "orientation": "default",
+    "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -31,12 +31,18 @@
           "image": "./assets/splash-icon.png"
         }
       ],
-      "react-native-edge-to-edge"
+      "react-native-edge-to-edge",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location for order tracking."
+        }
+      ]
     ],
-    "owner": "privateluminan",
+    "owner": "luminan",
     "extra": {
       "eas": {
-        "projectId": "9cbdfef3-79ff-4081-9a1a-4fe43322fe9c"
+        "projectId": "9e6fc973-9a12-46a4-b334-c65e80f92b9d"
       }
     }
   }

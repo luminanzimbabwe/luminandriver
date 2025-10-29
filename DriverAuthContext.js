@@ -2,6 +2,7 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SHA256 } from "crypto-js";
+import { Alert } from "react-native";
 import driverApi from "./services/driverApi";
 
 const DriverAuthContext = createContext();
@@ -31,6 +32,18 @@ export const DriverAuthProvider = ({ children }) => {
   // --- Sign Out ---
   const signOut = async () => {
     console.log("Signing out driver...");
+
+    // Stop general location tracking
+    try {
+      const locationTracker = (await import('./services/locationTracker')).default;
+      if (locationTracker.isGeneralTrackingActive()) {
+        locationTracker.stopGeneralTracking();
+        console.log("✅ General location tracking stopped");
+      }
+    } catch (error) {
+      console.warn("⚠️ Failed to stop general location tracking:", error);
+    }
+
     setDriver(null);
     await AsyncStorage.removeItem("driverProfile");
     await AsyncStorage.removeItem("pinLastLogin");
@@ -70,6 +83,7 @@ export const DriverAuthProvider = ({ children }) => {
           setPinRequired(true);
           setDriver(null);
         } else {
+          // Allow access as long as driver has ID, regardless of verification
           setDriver(parsedProfile);
           setPinRequired(false); // ✅ explicitly allow access
 
@@ -83,10 +97,23 @@ export const DriverAuthProvider = ({ children }) => {
               setDriver(freshDriverData);
               await updateDriverCache(freshDriverData);
               console.log("✅ Profile refreshed successfully.");
+
+              // Start general location tracking for admin monitoring
+              try {
+                const locationTracker = (await import('./services/locationTracker')).default;
+                if (!locationTracker.isGeneralTrackingActive()) {
+                  await locationTracker.startGeneralTracking(driverId);
+                  console.log("✅ General location tracking started for admin monitoring");
+                }
+              } catch (error) {
+                console.warn("⚠️ Failed to start general location tracking:", error);
+              }
             } else {
-              console.warn("⚠️ Profile refresh failed - using cached profile.");
-              // Keep cached profile and PIN for offline access
-              // User can still login with PIN even if backend is unavailable
+              console.warn("⚠️ Profile refresh failed - driver may have been deleted from backend.");
+              // Force logout if driver not found on backend
+              console.log("🚪 Forcing logout due to driver deletion...");
+              await signOut();
+              return;
             }
           }
         }
@@ -118,48 +145,40 @@ export const DriverAuthProvider = ({ children }) => {
         signOut,
         pinRequired,
 
-        // --- OTP verification ---
-        verifyOtp: async (otpData) => {
-          const result = await driverApi.verifyDriverOtp(otpData);
-          if (result.success && result.data?.driver) {
-            const driverData = result.data.driver;
-            setDriver(driverData);
-            await updateDriverCache(driverData);
-            // Require PIN setup after verification
-            setPinRequired(true);
-            return { success: true, data: result.data };
-          }
-          return { success: false, error: result.error || "OTP verification failed" };
-        },
+
 
         // --- Driver registration ---
         registerDriver: async (driverData) => {
           const result = await driverApi.registerDriver(driverData);
-          if (result.success && result.data.temp_driver_id) {
-            // Store the PIN locally for login if provided
+          if (result.success && result.data.driver) {
+            // Driver is now immediately verified - no OTP needed
+            const driverDataFromResponse = result.data.driver;
+
+            // Store the PIN locally for login
             if (driverData.pin) {
               const hashedPin = SHA256(driverData.pin).toString();
               await AsyncStorage.setItem("driverPin", hashedPin);
               await AsyncStorage.setItem("pinLastLogin", new Date().toISOString());
             }
 
-            // Create a temporary driver object for caching (will be updated after OTP verification)
-            const tempDriverData = {
-              _id: result.data.temp_driver_id,
-              username: driverData.username || driverData.name,
-              email: driverData.email,
-              is_verified: false,
-              currentLocation: { lat: 0.0, lng: 0.0 },
-              speed: 0,
-              lastUpdate: null,
-            };
+            // Cache the verified driver data immediately
+            await updateDriverCache(driverDataFromResponse);
 
-            // Cache the temporary driver data so PIN login can work
-            await updateDriverCache(tempDriverData);
-            // Set driver immediately after registration to remember the driver
-            setDriver(tempDriverData);
+            // Set driver immediately after registration - they're ready to use
+            setDriver(driverDataFromResponse);
 
-            return { success: true, temp_driver_id: result.data.temp_driver_id };
+            // Start general location tracking for admin monitoring
+            try {
+              const locationTracker = (await import('./services/locationTracker')).default;
+              if (!locationTracker.isGeneralTrackingActive()) {
+                await locationTracker.startGeneralTracking(driverDataFromResponse._id);
+                console.log("✅ General location tracking started for new driver");
+              }
+            } catch (error) {
+              console.warn("⚠️ Failed to start general location tracking:", error);
+            }
+
+            return { success: true, driver: driverDataFromResponse };
           }
           return { success: false, error: result.error || "Registration failed" };
         },
@@ -181,8 +200,10 @@ export const DriverAuthProvider = ({ children }) => {
             // Restore driver from cache
             const cachedProfile = await AsyncStorage.getItem("driverProfile");
             if (cachedProfile) {
-              const parsedProfile = JSON.parse(cachedProfile);
-              setDriver(parsedProfile);
+              const driverData = JSON.parse(cachedProfile);
+              // Allow access as long as driver has ID, regardless of verification or orders
+              setDriver(driverData);
+              return true;
             }
             return true;
           }

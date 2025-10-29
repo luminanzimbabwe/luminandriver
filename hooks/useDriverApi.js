@@ -83,7 +83,7 @@ export const useDriverApi = () => {
   const confirmOrder = useCallback(
     async (orderId) => {
       if (!driver?._id) return { success: false, error: "No driver ID" };
-      return await callApi(driverApi.confirmOrder, orderId, { driver_id: driver._id });
+      return await callApi(driverApi.confirmOrder, orderId, driver._id);
     },
     [driver, callApi]
   );

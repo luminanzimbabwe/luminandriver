@@ -65,10 +65,9 @@ const RegisterScreen = ({ navigation }) => {
       const result = await registerDriver(formData);
 
       if (result.success) {
-        // Set PIN after successful registration
-        await setPin(formData.pin);
-        // Navigate to OTP verification screen with temp_driver_id
-        navigation.navigate("OtpVerification", { temp_driver_id: result.temp_driver_id });
+        // Driver is now immediately verified - no OTP needed
+        // Navigate directly to main app (skip OTP verification)
+        navigation.replace("MainApp"); // Navigate to the main tab navigator
       } else {
         setErrors({ general: result.error || "Registration failed" });
       }
@@ -144,12 +143,7 @@ const RegisterScreen = ({ navigation }) => {
             </LinearGradient>
           </TouchableOpacity>
 
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Need to verify account?</Text>
-            <TouchableOpacity onPress={() => navigation.navigate("OtpVerification")}>
-              <Text style={[styles.footerText, { color: "#00eaff", marginLeft: 5 }]}>Verify OTP</Text>
-            </TouchableOpacity>
-          </View>
+
         </Animated.View>
       </ScrollView>
 

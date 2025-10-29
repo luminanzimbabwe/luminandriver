@@ -13,9 +13,10 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 // Assuming these are correct paths
-import { useDriverAuth } from "../DriverAuthContext"; 
-import { useDriverApi } from "../hooks/useDriverApi"; 
+import { useDriverAuth } from "../DriverAuthContext";
+import { useDriverApi } from "../hooks/useDriverApi";
 import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect } from "@react-navigation/native";
 
 const { width } = Dimensions.get("window");
 
@@ -266,13 +267,15 @@ const OrdersScreen = () => {
         }
     }, [getOrders, getDriverPerformanceMetrics]); 
 
-    useEffect(() => {
-        if (isLoggedIn) {
-            fetchData();
-        } else {
-            setLoading(false);
-        }
-    }, [isLoggedIn, fetchData]);
+    useFocusEffect(
+        React.useCallback(() => {
+            if (isLoggedIn) {
+                fetchData();
+            } else {
+                setLoading(false);
+            }
+        }, [isLoggedIn, fetchData])
+    );
 
     const handleRefresh = () => {
         setRefreshing(true);

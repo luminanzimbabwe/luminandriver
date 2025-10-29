@@ -9,7 +9,6 @@
  */
 
 // Environment configuration
-// Environment configuration
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://backend-luminan.onrender.com";
 const API_VERSION = "/api/v1";
 const DRIVER_BASE = `${API_VERSION}/driver`;
@@ -92,14 +91,7 @@ export const loginDriver = async (credentials) => {
   return await apiRequest("/api/v1/driver/login/", "POST", credentials);
 };
 
-/**
- * Verify driver OTP after registration
- * @param {object} otpData - { temp_driver_id, otp_code }
- * @returns {Promise<object>} - Verification response with driver data
- */
-export const verifyDriverOtp = async (otpData) => {
-  return await apiRequest("/api/v1/driver/verify-otp/", "POST", otpData);
-};
+
 
 /**
  * Get driver profile by driver ID
@@ -156,11 +148,19 @@ export const setDriverPricePerKg = async (priceData) => {
 /**
  * Confirm an order
  * @param {string} orderId - Order ID
- * @param {object} confirmData - Confirmation data { driver_id }
+ * @param {string} driverId - Driver ID
  * @returns {Promise<object>} - Order confirmation response
  */
-export const confirmOrder = async (orderId, confirmData) => {
-  return await apiRequest(`${DRIVER_BASE}/orders/${orderId}/confirm/`, "POST", confirmData);
+export const confirmOrder = async (orderId, driverId) => {
+  // Accept whatever driver identifier is available and let the backend decide
+  // whether the driver exists. This avoids client-side false negatives when
+  // temporary IDs or non-standard IDs are used (e.g., during registration
+  // or offline cached profiles).
+  if (!driverId) {
+    return { success: false, error: "No driver ID provided" };
+  }
+
+  return await apiRequest(`${DRIVER_BASE}/orders/${orderId}/confirm/`, "POST", { driver_id: driverId });
 };
 
 /**
@@ -528,7 +528,6 @@ export const getBackendUrl = () => BACKEND_URL;
 export default {
   // Auth & Management
   registerDriver,
-  verifyDriverOtp,
   getDriverProfile,
   getDriverAssignedOrders,
   getOrderDetails,
